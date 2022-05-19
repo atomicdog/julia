@@ -2239,15 +2239,21 @@ end
 
 @inline function update_bbstate!(frame::InferenceState, bb::Int, vartable::VarTable)
     bbtable = frame.bb_vartables[bb]
-    if bb in frame.analyzed_bbs
-        newstate = stupdate!(bbtable, vartable)
-    else
+    if bbtable === nothing
         # if a basic block hasn't been analyzed yet,
         # we can update its state a bit more aggressively
-        newstate = stoverwrite!(bbtable, vartable)
-        push!(frame.analyzed_bbs, bb)
+        return frame.bb_vartables[bb] = copy(vartable)
+    else
+        return stupdate!(bbtable, vartable)
     end
-    return newstate
+end
+
+function init_vartable!(vartable::VarTable, frame::InferenceState)
+    nargtypes = length(frame.result.argtypes)
+    for i = 1:length(vartable)
+        vartable[i] = VarState(Bottom, i > nargtypes)
+    end
+    return vartable
 end
 
 # make as much progress on `frame` as possible (without handling cycles)
@@ -2269,7 +2275,7 @@ function typeinf_local(interp::AbstractInterpreter, frame::InferenceState)
     end
 
     states = frame.bb_vartables
-    currstate = copy(states[currbb])
+    currstate = copy(states[currbb]::VarTable)
     while currbb <= nbbs
         delete!(W, currbb)
         bbstart = first(bbs[currbb].stmts)
@@ -2418,7 +2424,7 @@ function typeinf_local(interp::AbstractInterpreter, frame::InferenceState)
                         # propagate new type info to exception handler
                         # the handling for Expr(:enter) propagates all changes from before the try/catch
                         # so this only needs to propagate any changes
-                        if stupdate1!(states[exceptbb], changes)
+                        if stupdate1!(states[exceptbb]::VarTable, changes)
                             push!(W, exceptbb)
                         end
                         cur_hand = frame.handler_at[cur_hand]
@@ -2455,7 +2461,12 @@ function typeinf_local(interp::AbstractInterpreter, frame::InferenceState)
             currbb == -1 && break # the working set is empty
             currbb > nbbs && break
 
-            stoverwrite!(currstate, states[currbb])
+            nexttable = states[currbb]
+            if nexttable === nothing
+                init_vartable!(currstate, frame)
+            else
+                stoverwrite!(currstate, nexttable)
+            end
         end
     end # while currbb <= nbbs
 
