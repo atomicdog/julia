@@ -32,7 +32,11 @@ function inflate_ir(ci::CodeInfo, sptypes::Vector{Any}, argtypes::Vector{Any})
         ssavaluetypes isa Vector{Any} ? copy(ssavaluetypes) : Any[ Any for i = 1:(ssavaluetypes::Int) ]
     end
     stmts = InstructionStream(code, ssavaluetypes, Any[nothing for i = 1:nstmts], copy(ci.codelocs), copy(ci.ssaflags))
-    ir = IRCode(stmts, cfg, collect(LineInfoNode, ci.linetable), argtypes, Expr[], sptypes)
+    linetable = ci.linetable
+    if !isa(linetable, Vector{LineInfoNode})
+        linetable = collect(LineInfoNode, linetable::Vector{Any})::Vector{LineInfoNode}
+    end
+    ir = IRCode(stmts, cfg, linetable, argtypes, Expr[], sptypes)
     return ir
 end
 
