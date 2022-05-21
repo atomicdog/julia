@@ -33,11 +33,12 @@ function inflate_ir(ci::CodeInfo, sptypes::Vector{Any}, argtypes::Vector{Any})
     end
     stmts = InstructionStream(code, ssavaluetypes, Any[nothing for i = 1:nstmts], copy(ci.codelocs), copy(ci.ssaflags))
     linetable = ci.linetable
-    if !isa(linetable, Vector{LineInfoNode})
+    if isa(linetable, Vector{LineInfoNode})
+        linetable = copy(linetable)
+    else
         linetable = collect(LineInfoNode, linetable::Vector{Any})::Vector{LineInfoNode}
     end
-    ir = IRCode(stmts, cfg, linetable, argtypes, Expr[], sptypes)
-    return ir
+    return IRCode(stmts, cfg, linetable, argtypes, Expr[], sptypes)
 end
 
 function replace_code_newstyle!(ci::CodeInfo, ir::IRCode, nargs::Int)
