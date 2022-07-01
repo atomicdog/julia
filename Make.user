@@ -1,1 +1,3 @@
-MARCH=native
+MARCH = native
+
+#USE_MLIR := 1
