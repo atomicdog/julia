@@ -237,7 +237,7 @@ JL_DLLEXPORT void jl_raise(int signo)
 #endif
 }
 
-JL_DLLEXPORT void jl_atexit_hook(int exitcode)
+JL_DLLEXPORT void jl_atexit_hook(int exitcode) JL_NOTSAFEPOINT_ENTER
 {
     uv_tty_reset_mode();
 
@@ -807,13 +807,13 @@ static NOINLINE void _finish_julia_init(JL_IMAGE_SEARCH rel, jl_ptls_t ptls, jl_
         jl_preload_sysimg_so(jl_options.image_file);
     if (jl_options.cpu_target == NULL)
         jl_options.cpu_target = "native";
+    jl_init_codegen();
 
     if (jl_options.image_file) {
         jl_restore_system_image(jl_options.image_file);
     } else {
         jl_init_types();
         jl_global_roots_table = jl_alloc_vec_any(0);
-        jl_init_codegen();
     }
 
     jl_init_common_symbols();
@@ -910,10 +910,10 @@ static void post_boot_hooks(void)
     jl_init_box_caches();
 
     // set module field of primitive types
-    int i;
-    void **table = jl_core_module->bindings.table;
-    for (i = 1; i < jl_core_module->bindings.size; i += 2) {
-        if (table[i] != HT_NOTFOUND) {
+    jl_svec_t *bindings = jl_atomic_load_relaxed(&jl_core_module->bindings);
+    jl_value_t **table = jl_svec_data(bindings);
+    for (size_t i = 0; i < jl_svec_len(bindings); i++) {
+        if (table[i] != jl_nothing) {
             jl_binding_t *b = (jl_binding_t*)table[i];
             jl_value_t *v = jl_atomic_load_relaxed(&b->value);
             if (v) {
