@@ -177,7 +177,7 @@ mutable struct InferenceState
 
         valid_worlds = WorldRange(src.min_world, src.max_world == typemax(UInt) ? get_world_counter() : src.max_world)
         bestguess = Bottom
-        ipo_effects = Effects(EFFECTS_TOTAL)
+        ipo_effects = EFFECTS_TOTAL
 
         params = InferenceParams(interp)
         restrict_abstract_call_sites = isa(linfo.def, Module)
@@ -224,8 +224,8 @@ add_remark!(::AbstractInterpreter, sv::Union{InferenceState, IRCode}, remark) = 
 function bail_out_toplevel_call(::AbstractInterpreter, @nospecialize(callsig), sv::Union{InferenceState, IRCode})
     return isa(sv, InferenceState) && sv.restrict_abstract_call_sites && !isdispatchtuple(callsig)
 end
-function bail_out_call(::AbstractInterpreter, @nospecialize(rt), sv::Union{InferenceState, IRCode})
-    return rt === Any
+function bail_out_call(::AbstractInterpreter, @nospecialize(rt), sv::Union{InferenceState, IRCode}, effects::Effects)
+    return rt === Any && !is_foldable(effects)
 end
 function bail_out_apply(::AbstractInterpreter, @nospecialize(rt), sv::Union{InferenceState, IRCode})
     return rt === Any
