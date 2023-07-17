@@ -529,8 +529,10 @@ function ismutabletype(@nospecialize t)
     @_total_meta
     t = unwrap_unionall(t)
     # TODO: what to do for `Union`?
-    return isa(t, DataType) && t.name.flags & 0x2 == 0x2
+    return isa(t, DataType) && ismutabletypename(t.name)
 end
+
+ismutabletypename(tn::Core.TypeName) = tn.flags & 0x2 == 0x2
 
 """
     isstructtype(T) -> Bool
@@ -1669,7 +1671,7 @@ function print_statement_costs(io::IO, @nospecialize(tt::Type);
             empty!(cst)
             resize!(cst, length(code.code))
             sptypes = Core.Compiler.VarState[Core.Compiler.VarState(sp, false) for sp in match.sparams]
-            maxcost = Core.Compiler.statement_costs!(cst, code.code, code, sptypes, false, params)
+            maxcost = Core.Compiler.statement_costs!(cst, code.code, code, sptypes, params)
             nd = ndigits(maxcost)
             irshow_config = IRShow.IRShowConfig() do io, linestart, idx
                 print(io, idx > 0 ? lpad(cst[idx], nd+1) : " "^(nd+1), " ")
@@ -2157,15 +2159,15 @@ end
 """
     @invokelatest f(args...; kwargs...)
 
-Provides a convenient way to call [`Base.invokelatest`](@ref).
+Provides a convenient way to call [`invokelatest`](@ref).
 `@invokelatest f(args...; kwargs...)` will simply be expanded into
 `Base.invokelatest(f, args...; kwargs...)`.
 
 It also supports the following syntax:
 - `@invokelatest x.f` expands to `Base.invokelatest(getproperty, x, :f)`
 - `@invokelatest x.f = v` expands to `Base.invokelatest(setproperty!, x, :f, v)`
-- `@invokelatest xs[i]` expands to `invoke(getindex, xs, i)`
-- `@invokelatest xs[i] = v` expands to `invoke(setindex!, xs, v, i)`
+- `@invokelatest xs[i]` expands to `Base.invokelatest(getindex, xs, i)`
+- `@invokelatest xs[i] = v` expands to `Base.invokelatest(setindex!, xs, v, i)`
 
 ```jldoctest
 julia> @macroexpand @invokelatest f(x; kw=kwv)
@@ -2187,8 +2189,11 @@ julia> @macroexpand @invokelatest xs[i] = v
 !!! compat "Julia 1.7"
     This macro requires Julia 1.7 or later.
 
+!!! compat "Julia 1.9"
+    Prior to Julia 1.9, this macro was not exported, and was called as `Base.@invokelatest`.
+
 !!! compat "Julia 1.10"
-    The additional syntax is supported as of Julia 1.10.
+    The additional `x.f` and `xs[i]` syntax requires Julia 1.10.
 """
 macro invokelatest(ex)
     topmod = Core.Compiler._topmod(__module__) # well, except, do not get it via CC but define it locally
