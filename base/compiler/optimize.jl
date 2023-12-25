@@ -43,6 +43,8 @@ const IR_FLAG_EFIIMO      = one(UInt32) << 9
 # This is :inaccessiblememonly == INACCESSIBLEMEM_OR_ARGMEMONLY
 const IR_FLAG_INACCESSIBLE_OR_ARGMEM = one(UInt32) << 10
 
+const NUM_IR_FLAGS = 11 # sync with julia.h
+
 const IR_FLAGS_EFFECTS = IR_FLAG_EFFECT_FREE | IR_FLAG_NOTHROW | IR_FLAG_CONSISTENT | IR_FLAG_NOUB
 
 has_flag(curr::UInt32, flag::UInt32) = (curr & flag) == flag
@@ -383,7 +385,7 @@ function argextype(
         return Const(x.value)
     elseif isa(x, GlobalRef)
         return abstract_eval_globalref_type(x)
-    elseif isa(x, PhiNode)
+    elseif isa(x, PhiNode) || isa(x, PhiCNode) || isa(x, UpsilonNode)
         return Any
     elseif isa(x, PiNode)
         return x.typ
@@ -698,7 +700,7 @@ function scan_non_dataflow_flags!(inst::Instruction, sv::PostOptAnalysisState)
     flag = inst[:flag]
     # If we can prove that the argmem does not escape the current function, we can
     # refine this to :effect_free.
-    needs_ea_validation = (flag & IR_FLAGS_NEEDS_EA) == IR_FLAGS_NEEDS_EA
+    needs_ea_validation = has_flag(flag, IR_FLAGS_NEEDS_EA)
     stmt = inst[:stmt]
     if !needs_ea_validation
         if !isterminator(stmt) && stmt !== nothing
@@ -730,7 +732,7 @@ end
 
 function scan_inconsistency!(inst::Instruction, sv::PostOptAnalysisState)
     flag = inst[:flag]
-    stmt_inconsistent = iszero(flag & IR_FLAG_CONSISTENT)
+    stmt_inconsistent = !has_flag(flag, IR_FLAG_CONSISTENT)
     stmt = inst[:stmt]
     # Special case: For `getfield` and memory operations, we allow inconsistency of the :boundscheck argument
     (; inconsistent, tpdum) = sv
@@ -976,7 +978,16 @@ function convert_to_ircode(ci::CodeInfo, sv::OptimizationState)
                 catchdest = expr.catch_dest
                 if catchdest in sv.unreachable
                     cfg_delete_edge!(sv.cfg, block_for_inst(sv.cfg, i), block_for_inst(sv.cfg, catchdest))
-                    code[i] = nothing
+                    if isdefined(expr, :scope)
+                        # We've proven that nothing inside the enter region throws,
+                        # but we don't yet know whether something might read the scope,
+                        # so we need to retain this enter for the time being. However,
+                        # we use the special marker `0` to indicate that setting up
+                        # the try/catch frame is not required.
+                        code[i] = EnterNode(expr, 0)
+                    else
+                        code[i] = nothing
+                    end
                 end
             end
         end
@@ -1362,11 +1373,14 @@ function renumber_ir_elements!(body::Vector{Any}, ssachangemap::Vector{Int}, lab
             end
         elseif isa(el, EnterNode)
             tgt = el.catch_dest
-            was_deleted = labelchangemap[tgt] == typemin(Int)
-            if was_deleted
-                body[i] = nothing
-            else
-                body[i] = EnterNode(el, tgt + labelchangemap[tgt])
+            if tgt != 0
+                was_deleted = labelchangemap[tgt] == typemin(Int)
+                if was_deleted
+                    @assert !isdefined(el, :scope)
+                    body[i] = nothing
+                else
+                    body[i] = EnterNode(el, tgt + labelchangemap[tgt])
+                end
             end
         elseif isa(el, Expr)
             if el.head === :(=) && el.args[2] isa Expr
