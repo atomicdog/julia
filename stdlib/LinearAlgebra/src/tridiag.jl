@@ -148,6 +148,7 @@ Matrix(M::SymTridiagonal{T}) where {T} = Matrix{promote_type(T, typeof(zero(T)))
 Array(M::SymTridiagonal) = Matrix(M)
 
 size(A::SymTridiagonal) = (n = length(A.dv); (n, n))
+axes(M::SymTridiagonal) = (ax = axes(M.dv, 1); (ax, ax))
 
 similar(S::SymTridiagonal, ::Type{T}) where {T} = SymTridiagonal(similar(S.dv, T), similar(S.ev, T))
 similar(S::SymTridiagonal, ::Type{T}, dims::Union{Dims{1},Dims{2}}) where {T} = similar(S.dv, T, dims)
@@ -581,6 +582,7 @@ function Tridiagonal{T,V}(A::Tridiagonal) where {T,V<:AbstractVector{T}}
 end
 
 size(M::Tridiagonal) = (n = length(M.d); (n, n))
+axes(M::Tridiagonal) = (ax = axes(M.d,1); (ax, ax))
 
 function Matrix{T}(M::Tridiagonal) where {T}
     A = Matrix{T}(undef, size(M))
@@ -944,7 +946,7 @@ function ldiv!(A::Tridiagonal, B::AbstractVecOrMat)
                         B[i+1,j] -= fact*B[i,j]
                     end
                 else
-                    checknonsingular(i, RowMaximum())
+                    checknonsingular(i)
                 end
                 i < n-1 && (dl[i] = 0)
             else
@@ -965,7 +967,7 @@ function ldiv!(A::Tridiagonal, B::AbstractVecOrMat)
                 end
             end
         end
-        iszero(d[n]) && checknonsingular(n, RowMaximum())
+        iszero(d[n]) && checknonsingular(n)
         # backward substitution
         for j in 1:nrhs
             B[n,j] /= d[n]
