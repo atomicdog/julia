@@ -6,6 +6,17 @@ const CC = Core.Compiler
 include("irutils.jl")
 include("newinterp.jl")
 
+# interpreter that performs abstract interpretation only
+# (semi-concrete interpretation should be disabled automatically)
+@newinterp AbsIntOnlyInterp1
+CC.may_optimize(::AbsIntOnlyInterp1) = false
+@test Base.infer_return_type(Base.init_stdio, (Ptr{Cvoid},); interp=AbsIntOnlyInterp1()) >: IO
+
+# it should work even if the interpreter discards inferred source entirely
+@newinterp AbsIntOnlyInterp2
+CC.may_optimize(::AbsIntOnlyInterp2) = false
+CC.transform_result_for_cache(::AbsIntOnlyInterp2, ::Core.MethodInstance, ::CC.WorldRange, ::CC.InferenceResult) = nothing
+@test Base.infer_return_type(Base.init_stdio, (Ptr{Cvoid},); interp=AbsIntOnlyInterp2()) >: IO
 
 # OverlayMethodTable
 # ==================
@@ -334,12 +345,12 @@ function CC.abstract_call(interp::NoinlineInterpreter,
     end
     return ret
 end
-function CC.inlining_policy(interp::NoinlineInterpreter,
+function CC.src_inlining_policy(interp::NoinlineInterpreter,
     @nospecialize(src), @nospecialize(info::CallInfo), stmt_flag::UInt32)
     if isa(info, NoinlineCallInfo)
-        return nothing
+        return false
     end
-    return @invoke CC.inlining_policy(interp::CC.AbstractInterpreter,
+    return @invoke CC.src_inlining_policy(interp::CC.AbstractInterpreter,
         src::Any, info::CallInfo, stmt_flag::UInt32)
 end
 
@@ -399,7 +410,6 @@ end
 Core.eval(Core.Compiler, quote f(;a=1) = a end)
 @test_throws MethodError Core.Compiler.f(;b=2)
 
-
 # Custom lookup function
 # ======================
 
@@ -438,7 +448,7 @@ function custom_lookup(mi::MethodInstance, min_world::UInt, max_world::UInt)
     for inf_result in CONST_INVOKE_INTERP.inf_cache
         if inf_result.linfo === mi
             if CC.any(inf_result.overridden_by_const)
-                return CodeInstance(CONST_INVOKE_INTERP, inf_result, inf_result.valid_worlds)
+                return CodeInstance(CONST_INVOKE_INTERP, inf_result)
             end
         end
     end
@@ -453,7 +463,6 @@ let # generate cache
     target_mi = CC.specialize_method(only(methods(custom_lookup_target)), Tuple{typeof(custom_lookup_target),Bool,Int}, Core.svec())
     target_ci = custom_lookup(target_mi, CONST_INVOKE_INTERP_WORLD, CONST_INVOKE_INTERP_WORLD)
     @test target_ci.rettype == Tuple{Float64,Nothing} # constprop'ed source
-    # display(@ccall jl_uncompress_ir(target_ci.def.def::Any, C_NULL::Ptr{Cvoid}, target_ci.inferred::Any)::Any)
 
     raw = false
     lookup = @cfunction(custom_lookup, Any, (Any,Csize_t,Csize_t))
@@ -468,4 +477,40 @@ let # generate cache
     s = String(take!(io))
     @test  occursin("j_sin_", s)
     @test !occursin("j_cos_", s)
+end
+
+# custom inferred data
+# ====================
+
+@newinterp CustomDataInterp
+struct CustomDataInterpToken end
+CC.cache_owner(::CustomDataInterp) = CustomDataInterpToken()
+struct CustomData
+    inferred
+    CustomData(@nospecialize inferred) = new(inferred)
+end
+function CC.transform_result_for_cache(interp::CustomDataInterp,
+    mi::Core.MethodInstance, valid_worlds::CC.WorldRange, result::CC.InferenceResult)
+    inferred_result = @invoke CC.transform_result_for_cache(interp::CC.AbstractInterpreter,
+        mi::Core.MethodInstance, valid_worlds::CC.WorldRange, result::CC.InferenceResult)
+    return CustomData(inferred_result)
+end
+function CC.src_inlining_policy(interp::CustomDataInterp, @nospecialize(src),
+                            @nospecialize(info::CC.CallInfo), stmt_flag::UInt32)
+    if src isa CustomData
+        src = src.inferred
+    end
+    return @invoke CC.src_inlining_policy(interp::CC.AbstractInterpreter, src::Any,
+                                          info::CC.CallInfo, stmt_flag::UInt32)
+end
+CC.retrieve_ir_for_inlining(cached_result::CodeInstance, src::CustomData) =
+    CC.retrieve_ir_for_inlining(cached_result, src.inferred)
+CC.retrieve_ir_for_inlining(mi::MethodInstance, src::CustomData, preserve_local_sources::Bool) =
+    CC.retrieve_ir_for_inlining(mi, src.inferred, preserve_local_sources)
+let src = code_typed((Int,); interp=CustomDataInterp()) do x
+        return sin(x) + cos(x)
+    end |> only |> first
+    @test count(isinvoke(:sin), src.code) == 1
+    @test count(isinvoke(:cos), src.code) == 1
+    @test count(isinvoke(:+), src.code) == 0
 end

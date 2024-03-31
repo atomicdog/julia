@@ -1972,6 +1972,16 @@ end
 
     @test zero([[2,2], [3,3,3]]) isa Vector{Vector{Int}}
     @test zero([[2,2], [3,3,3]]) == [[0,0], [0, 0, 0]]
+
+
+    @test zero(Union{Float64, Missing}[missing]) == [0.0]
+    struct CustomNumber <: Number
+        val::Float64
+    end
+    Base.zero(::Type{CustomNumber}) = CustomNumber(0.0)
+    @test zero([CustomNumber(5.0)]) == [CustomNumber(0.0)]
+    @test zero(Union{CustomNumber, Missing}[missing]) == [CustomNumber(0.0)]
+    @test zero(Vector{Union{CustomNumber, Missing}}(undef, 1)) == [CustomNumber(0.0)]
 end
 
 @testset "`_prechecked_iterate` optimization" begin
@@ -2017,5 +2027,66 @@ end
         B .= 0
         copyto!(view(B, axes(B)...), view(A, axes(A)...))
         @test B == A
+    end
+end
+
+@testset "_unsetindex!" begin
+    struct MyMatrixUnsetIndexCartInds{T,A<:AbstractMatrix{T}} <: AbstractMatrix{T}
+        data :: A
+    end
+    Base.size(A::MyMatrixUnsetIndexCartInds) = size(A.data)
+    Base.getindex(M::MyMatrixUnsetIndexCartInds, i::Int, j::Int) = M.data[i,j]
+    Base.setindex!(M::MyMatrixUnsetIndexCartInds, v, i::Int, j::Int) = setindex!(M.data, v, i, j)
+    struct MyMatrixUnsetIndexLinInds{T,A<:AbstractMatrix{T}} <: AbstractMatrix{T}
+        data :: A
+    end
+    Base.size(A::MyMatrixUnsetIndexLinInds) = size(A.data)
+    Base.getindex(M::MyMatrixUnsetIndexLinInds, i::Int) = M.data[i]
+    Base.setindex!(M::MyMatrixUnsetIndexLinInds, v, i::Int) = setindex!(M.data, v, i)
+    Base.IndexStyle(::Type{<:MyMatrixUnsetIndexLinInds}) = IndexLinear()
+
+    function test_unsetindex(MT)
+        M = MT(ones(2,2))
+        M2 = MT(Matrix{BigFloat}(undef, 2,2))
+        copyto!(M, M2)
+        @test all(==(1), M)
+        M3 = MT(Matrix{BigFloat}(undef, 2,2))
+        for i in eachindex(M3)
+            @test !isassigned(M3, i)
+        end
+        M3 .= 1
+        @test_throws MethodError copyto!(M3, M2)
+    end
+    test_unsetindex(MyMatrixUnsetIndexCartInds)
+    test_unsetindex(MyMatrixUnsetIndexLinInds)
+end
+
+@testset "reshape for offset arrays" begin
+    p = Base.IdentityUnitRange(3:4)
+    r = reshape(p, :, 1)
+    @test r[eachindex(r)] == UnitRange(p)
+    @test collect(r) == r
+
+    struct ZeroBasedArray{T,N,A<:AbstractArray{T,N}} <: AbstractArray{T,N}
+        a :: A
+        function ZeroBasedArray(a::AbstractArray)
+            Base.require_one_based_indexing(a)
+            new{eltype(a), ndims(a), typeof(a)}(a)
+        end
+    end
+    Base.parent(z::ZeroBasedArray) = z.a
+    Base.size(z::ZeroBasedArray) = size(parent(z))
+    Base.axes(z::ZeroBasedArray) = map(x -> Base.IdentityUnitRange(0:x - 1), size(parent(z)))
+    Base.getindex(z::ZeroBasedArray{<:Any, N}, i::Vararg{Int,N}) where {N} = parent(z)[map(x -> x + 1, i)...]
+    Base.setindex!(z::ZeroBasedArray{<:Any, N}, val, i::Vararg{Int,N}) where {N} = parent(z)[map(x -> x + 1, i)...] = val
+
+    z = ZeroBasedArray(collect(1:4))
+    r2 = reshape(z, :, 1)
+    @test r2[CartesianIndices(r2)] == r2[LinearIndices(r2)]
+    r2[firstindex(r2)] = 34
+    @test z[0] == 34
+    r2[eachindex(r2)] = r2 .* 2
+    for (i, j) in zip(eachindex(r2), eachindex(z))
+        @test r2[i] == z[j]
     end
 end

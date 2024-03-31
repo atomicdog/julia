@@ -219,7 +219,12 @@ function _unsetindex!(A::Array, i::Int)
     @inbounds _unsetindex!(GenericMemoryRef(A.ref, i))
     return A
 end
-
+function _unsetindex!(A::Array, i::Int...)
+    @inline
+    @boundscheck checkbounds(A, i...)
+    @inbounds _unsetindex!(A, _to_linear_index(A, i...))
+    return A
+end
 
 # TODO: deprecate this (aligned_sizeof and/or elsize and/or sizeof(Some{T}) are more correct)
 elsize(::Type{A}) where {T,A<:Array{T}} = aligned_sizeof(T)
@@ -1063,6 +1068,9 @@ function _growbeg!(a::Vector, delta::Integer)
     else
         @noinline (function()
         memlen = length(mem)
+        if offset + len - 1 > memlen || offset < 1
+            throw(ConcurrencyViolationError("Vector has invalid state. Don't modify internal fields incorrectly, or resize without correct locks"))
+        end
         # since we will allocate the array in the middle of the memory we need at least 2*delta extra space
         # the +1 is because I didn't want to have an off by 1 error.
         newmemlen = max(overallocation(memlen), len + 2 * delta + 1)
@@ -1078,6 +1086,9 @@ function _growbeg!(a::Vector, delta::Integer)
             newmem = array_new_memory(mem, newmemlen)
         end
         unsafe_copyto!(newmem, newoffset + delta, mem, offset, len)
+        if ref !== a.ref
+            @noinline throw(ConcurrencyViolationError("Vector can not be resized concurrently"))
+        end
         setfield!(a, :ref, @inbounds GenericMemoryRef(newmem, newoffset))
         end)()
     end
@@ -1098,6 +1109,10 @@ function _growend!(a::Vector, delta::Integer)
     newmemlen = offset + newlen - 1
     if memlen < newmemlen
         @noinline (function()
+        if offset + len - 1 > memlen || offset < 1
+            throw(ConcurrencyViolationError("Vector has invalid state. Don't modify internal fields incorrectly, or resize without correct locks"))
+        end
+
         if offset - 1 > div(5 * newlen, 4)
             # If the offset is far enough that we can copy without resizing
             # while maintaining proportional spacing on both ends of the array
@@ -1115,6 +1130,9 @@ function _growend!(a::Vector, delta::Integer)
         end
         newref = @inbounds GenericMemoryRef(newmem, newoffset)
         unsafe_copyto!(newref, ref, len)
+        if ref !== a.ref
+            @noinline throw(ConcurrencyViolationError("Vector can not be resized concurrently"))
+        end
         setfield!(a, :ref, newref)
         end)()
     end
@@ -2617,7 +2635,7 @@ Dict{Symbol, Int64} with 3 entries:
   :B => -1
   :C => 0
 
-julia> findall(x -> x >= 0, d)
+julia> findall(≥(0), d)
 2-element Vector{Symbol}:
  :A
  :C

@@ -365,7 +365,7 @@ module IteratorsMD
     end
 
     # getindex for a 0D CartesianIndices is necessary for disambiguation
-    @propagate_inbounds function Base.getindex(iter::CartesianIndices{0,R}) where {R}
+    @inline function Base.getindex(iter::CartesianIndices{0,R}) where {R}
         CartesianIndex()
     end
     @inline function Base.getindex(iter::CartesianIndices{N,R}, I::Vararg{Int, N}) where {N,R}
@@ -1608,6 +1608,12 @@ end
             end
         end
     end
+end
+
+# _unsetindex
+@propagate_inbounds function Base._unsetindex!(A::AbstractArray, i::CartesianIndex)
+    Base._unsetindex!(A, to_indices(A, (i,))...)
+    return A
 end
 
 ## permutedims

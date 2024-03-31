@@ -1218,6 +1218,7 @@ end
 copymutable(itr) = collect(itr)
 
 zero(x::AbstractArray{T}) where {T<:Number} = fill!(similar(x, typeof(zero(T))), zero(T))
+zero(x::AbstractArray{S}) where {S<:Union{Missing, Number}} = fill!(similar(x, typeof(zero(S))), zero(S))
 zero(x::AbstractArray) = map(zero, x)
 
 ## iteration support for arrays by iterating over `eachindex` in the array ##
@@ -1472,7 +1473,20 @@ function _setindex!(::IndexCartesian, A::AbstractArray, v, I::Vararg{Int,M}) whe
     r
 end
 
-_unsetindex!(A::AbstractArray, i::Integer) = _unsetindex!(A, to_index(i))
+function _unsetindex!(A::AbstractArray, i::Integer...)
+    @_propagate_inbounds_meta
+    _unsetindex!(A, map(to_index, i)...)
+end
+
+function _unsetindex!(A::AbstractArray{T}, i::Int...) where T
+    # this provides a fallback method which is a no-op if the element is already unassigned
+    # such that copying into an uninitialized object generally always will work,
+    # even if the specific custom array type has not implemented `_unsetindex!`
+    @inline
+    @boundscheck checkbounds(A, i...)
+    allocatedinline(T) || @inbounds(!isassigned(A, i...)) || throw(MethodError(_unsetindex!, (A, i...)))
+    return A
+end
 
 """
     parent(A)
@@ -1636,13 +1650,15 @@ eltypeof(x::AbstractArray) = eltype(x)
 
 promote_eltypeof() = error()
 promote_eltypeof(v1) = eltypeof(v1)
-promote_eltypeof(v1, vs...) = promote_type(eltypeof(v1), promote_eltypeof(vs...))
+promote_eltypeof(v1, v2) = promote_type(eltypeof(v1), eltypeof(v2))
+promote_eltypeof(v1, v2, vs...) = (@inline; afoldl(((::Type{T}, y) where {T}) -> promote_type(T, eltypeof(y)), promote_eltypeof(v1, v2), vs...))
 promote_eltypeof(v1::T, vs::T...) where {T} = eltypeof(v1)
 promote_eltypeof(v1::AbstractArray{T}, vs::AbstractArray{T}...) where {T} = T
 
 promote_eltype() = error()
 promote_eltype(v1) = eltype(v1)
-promote_eltype(v1, vs...) = promote_type(eltype(v1), promote_eltype(vs...))
+promote_eltype(v1, v2) = promote_type(eltype(v1), eltype(v2))
+promote_eltype(v1, v2, vs...) = (@inline; afoldl(((::Type{T}, y) where {T}) -> promote_type(T, eltype(y)), promote_eltype(v1, v2), vs...))
 promote_eltype(v1::T, vs::T...) where {T} = eltype(T)
 promote_eltype(v1::AbstractArray{T}, vs::AbstractArray{T}...) where {T} = T
 
@@ -3643,9 +3659,9 @@ end
 ## 1-d circshift ##
 function circshift!(a::AbstractVector, shift::Integer)
     n = length(a)
-    n == 0 && return
+    n == 0 && return a
     shift = mod(shift, n)
-    shift == 0 && return
+    shift == 0 && return a
     l = lastindex(a)
     reverse!(a, firstindex(a), l-shift)
     reverse!(a, l-shift+1, lastindex(a))
