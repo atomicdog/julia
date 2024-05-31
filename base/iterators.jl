@@ -36,6 +36,7 @@ import .Base:
     popfirst!, isdone, peek, intersect
 
 export enumerate, zip, rest, countfrom, take, drop, takewhile, dropwhile, cycle, repeated, product, flatten, flatmap
+public accumulate, filter, map, peel, reverse, Stateful
 
 if Base !== Core.Compiler
 export partition
@@ -60,9 +61,6 @@ julia> collect(Iterators.map(x -> x^2, 1:3))
 ```
 """
 map(f, arg, args...) = Base.Generator(f, arg, args...)
-
-tail_if_any(::Tuple{}) = ()
-tail_if_any(x::Tuple) = tail(x)
 
 _min_length(a, b, ::IsInfinite, ::IsInfinite) = min(length(a),length(b)) # inherit behaviour, error
 _min_length(a, b, A, ::IsInfinite) = length(a)

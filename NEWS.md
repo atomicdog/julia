@@ -36,6 +36,9 @@ Command-line option changes
 
 * The `-m/--module` flag can be passed to run the `main` function inside a package with a set of arguments.
   This `main` function should be declared using `@main` to indicate that it is an entry point.
+* Enabling or disabling color text in Julia can now be controlled with the
+[`NO_COLOR`](https://no-color.org/) or [`FORCE_COLOR`](https://force-color.org/) environment
+variables. ([#53742]).
 
 Multi-threading changes
 -----------------------
@@ -77,6 +80,8 @@ New library features
 Standard library changes
 ------------------------
 
+* `gcdx(0, 0)` now returns `(0, 0, 0)` instead of `(0, 1, 0)` ([#40989]).
+
 #### StyledStrings
 
 #### JuliaSyntaxHighlighting
@@ -84,6 +89,11 @@ Standard library changes
 #### Package Manager
 
 #### LinearAlgebra
+
+* `rank` can now take a `QRPivoted` matrix to allow rank estimation via QR factorization ([#54283]).
+* Added keyword argument `alg` to `eigen`, `eigen!`, `eigvals` and `eigvals!` for self-adjoint
+  matrix types (i.e., the type union `RealHermSymComplexHerm`) that allows one to switch
+  between different eigendecomposition algorithms ([#49355]).
 
 #### Logging
 
