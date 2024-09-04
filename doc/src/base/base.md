@@ -106,6 +106,7 @@ where
 .
 ->
 ::
+[]
 ```
 
 ## Standard Modules
@@ -281,6 +282,7 @@ Base.:(|>)
 Base.:(∘)
 Base.ComposedFunction
 Base.splat
+Base.Fix
 Base.Fix1
 Base.Fix2
 ```

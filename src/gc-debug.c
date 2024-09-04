@@ -1,6 +1,7 @@
 // This file is a part of Julia. License is MIT: https://julialang.org/license
 
-#include "gc.h"
+#include "gc-common.h"
+#include "gc-stock.h"
 #include "julia.h"
 #include <inttypes.h>
 #include <stddef.h>
@@ -536,13 +537,13 @@ static void gc_scrub_task(jl_task_t *ta)
 
     char *low;
     char *high;
-    if (ta->copy_stack && ptls2 && ta == jl_atomic_load_relaxed(&ptls2->current_task)) {
+    if (ta->ctx.copy_stack && ptls2 && ta == jl_atomic_load_relaxed(&ptls2->current_task)) {
         low  = (char*)ptls2->stackbase - ptls2->stacksize;
         high = (char*)ptls2->stackbase;
     }
-    else if (ta->stkbuf) {
-        low  = (char*)ta->stkbuf;
-        high = (char*)ta->stkbuf + ta->bufsz;
+    else if (ta->ctx.stkbuf) {
+        low  = (char*)ta->ctx.stkbuf;
+        high = (char*)ta->ctx.stkbuf + ta->ctx.bufsz;
     }
     else
         return;

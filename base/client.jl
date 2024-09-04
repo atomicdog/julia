@@ -292,12 +292,12 @@ function exec_options(opts)
             invokelatest(show, Core.eval(Main, parse_input_line(arg)))
             println()
         elseif cmd == 'm'
-            @eval Main import $(Symbol(arg)).main
+            entrypoint = push!(split(arg, "."), "main")
+            Base.eval(Main, Expr(:import, Expr(:., Symbol.(entrypoint)...)))
             if !should_use_main_entrypoint()
                 error("`main` in `$arg` not declared as entry point (use `@main` to do so)")
             end
             return false
-
         elseif cmd == 'L'
             # load file immediately on all processors
             if !distributed_mode
@@ -339,11 +339,13 @@ function _global_julia_startup_file()
     # If it is not found, then continue on to the relative path based on Sys.BINDIR
     BINDIR = Sys.BINDIR
     SYSCONFDIR = Base.SYSCONFDIR
+    p1 = nothing
     if !isempty(SYSCONFDIR)
         p1 = abspath(BINDIR, SYSCONFDIR, "julia", "startup.jl")
         isfile(p1) && return p1
     end
     p2 = abspath(BINDIR, "..", "etc", "julia", "startup.jl")
+    p1 == p2 && return nothing # don't check the same path twice
     isfile(p2) && return p2
     return nothing
 end
@@ -415,7 +417,7 @@ function load_REPL()
     return nothing
 end
 
-global active_repl
+global active_repl::Any
 global active_repl_backend = nothing
 
 function run_fallback_repl(interactive::Bool)

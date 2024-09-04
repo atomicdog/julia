@@ -14,6 +14,7 @@ public
     AsyncCondition,
     CodeUnits,
     Event,
+    Fix,
     Fix1,
     Fix2,
     Generator,
@@ -108,6 +109,9 @@ public
     # functions
     reseteof,
     link_pipe!,
+
+# filesystem operations
+    rename,
 
 # misc
     notnothing,
