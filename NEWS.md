@@ -56,6 +56,7 @@ variables. ([#53742]).
 * `--project=@temp` starts Julia with a temporary environment.
 * New `--trace-compile-timing` option to report how long each method reported by `--trace-compile` took
   to compile, in ms. ([#54662])
+* `--trace-compile` now prints recompiled methods in yellow or with a trailing comment if color is not supported ([#55763])
 
 Multi-threading changes
 -----------------------
@@ -128,6 +129,8 @@ Standard library changes
   between different eigendecomposition algorithms ([#49355]).
 * Added a generic version of the (unblocked) pivoted Cholesky decomposition
   (callable via `cholesky[!](A, RowMaximum())`) ([#54619]).
+* The number of default BLAS threads now respects process affinity, instead of
+  using total number of logical threads available on the system ([#55574]).
 
 #### Logging
 

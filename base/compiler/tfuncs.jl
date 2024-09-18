@@ -89,6 +89,7 @@ function add_tfunc(@nospecialize(f::Builtin), minarg::Int, maxarg::Int, @nospeci
 end
 
 add_tfunc(throw, 1, 1, @nospecs((𝕃::AbstractLattice, x)->Bottom), 0)
+add_tfunc(Core.throw_methoderror, 1, INT_INF, @nospecs((𝕃::AbstractLattice, x)->Bottom), 0)
 
 # the inverse of typeof_tfunc
 # returns (type, isexact, isconcrete, istype)
@@ -2313,6 +2314,7 @@ const _CONSISTENT_BUILTINS = Any[
     (<:),
     typeassert,
     throw,
+    Core.throw_methoderror,
     setfield!,
     donotdelete
 ]
@@ -2335,6 +2337,7 @@ const _EFFECT_FREE_BUILTINS = [
     (<:),
     typeassert,
     throw,
+    Core.throw_methoderror,
     getglobal,
     compilerbarrier,
 ]
@@ -2350,6 +2353,7 @@ const _INACCESSIBLEMEM_BUILTINS = Any[
     isa,
     nfields,
     throw,
+    Core.throw_methoderror,
     tuple,
     typeassert,
     typeof,
@@ -2979,9 +2983,9 @@ function abstract_applicable(interp::AbstractInterpreter, argtypes::Vector{Any},
         # also need an edge to the method table in case something gets
         # added that did not intersect with any existing method
         if isa(matches, MethodMatches)
-            matches.fullmatch || add_mt_backedge!(sv, matches.mt, atype)
+            fully_covering(matches) || add_mt_backedge!(sv, matches.info.mt, atype)
         else
-            for (thisfullmatch, mt) in zip(matches.fullmatches, matches.mts)
+            for (thisfullmatch, mt) in zip(matches.info.fullmatches, matches.info.mts)
                 thisfullmatch || add_mt_backedge!(sv, mt, atype)
             end
         end
@@ -2997,8 +3001,7 @@ function abstract_applicable(interp::AbstractInterpreter, argtypes::Vector{Any},
                 add_backedge!(sv, edge)
             end
 
-            if isa(matches, MethodMatches) ? (!matches.fullmatch || any_ambig(matches)) :
-                    (!all(matches.fullmatches) || any_ambig(matches))
+            if !fully_covering(matches) || any_ambig(matches)
                 # Account for the fact that we may encounter a MethodError with a non-covered or ambiguous signature.
                 rt = Bool
             end
