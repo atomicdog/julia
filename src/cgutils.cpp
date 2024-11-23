@@ -397,7 +397,8 @@ static llvm::SmallVector<Value*,0> get_gc_roots_for(jl_codectx_t &ctx, const jl_
 
 // --- emitting pointers directly into code ---
 
-
+static void jl_temporary_root(jl_codegen_params_t &ctx, jl_value_t *val);
+static void jl_temporary_root(jl_codectx_t &ctx, jl_value_t *val);
 static inline Constant *literal_static_pointer_val(const void *p, Type *T);
 
 static Constant *julia_pgv(jl_codectx_t &ctx, const char *cname, void *addr)
@@ -777,7 +778,8 @@ static Type *_julia_struct_to_llvm(jl_codegen_params_t *ctx, LLVMContext &ctxt, 
         if (ntypes == 0 || jl_datatype_nbits(jst) == 0)
             return getVoidTy(ctxt);
         Type *_struct_decl = NULL;
-        // TODO: we should probably make a temporary root for `jst` somewhere
+        if (ctx)
+            jl_temporary_root(*ctx, jt);
         // don't use pre-filled struct_decl for llvmcall (f16, etc. may be different)
         Type *&struct_decl = (ctx && !llvmcall ? ctx->llvmtypes[jst] : _struct_decl);
         if (struct_decl)
@@ -3506,8 +3508,6 @@ static Value *call_with_attrs(jl_codectx_t &ctx, JuliaFunction<TypeFn_t> *intr, 
     return Call;
 }
 
-static jl_value_t *jl_ensure_rooted(jl_codectx_t &ctx, jl_value_t *val);
-
 static Value *as_value(jl_codectx_t &ctx, Type *to, const jl_cgval_t &v)
 {
     assert(!v.isboxed);
@@ -3540,7 +3540,9 @@ static Value *_boxed_special(jl_codectx_t &ctx, const jl_cgval_t &vinfo, Type *t
         if (Constant *c = dyn_cast<Constant>(vinfo.V)) {
             jl_value_t *s = static_constant_instance(jl_Module->getDataLayout(), c, jt);
             if (s) {
-                s = jl_ensure_rooted(ctx, s);
+                JL_GC_PUSH1(&s);
+                jl_temporary_root(ctx, s);
+                JL_GC_POP();
                 return track_pjlvalue(ctx, literal_pointer_val(ctx, s));
             }
         }
@@ -4213,7 +4215,7 @@ static jl_cgval_t emit_new_struct(jl_codectx_t &ctx, jl_value_t *ty, size_t narg
                 else {
                     strct = UndefValue::get(lt);
                     if (nargs < nf)
-                        strct = ctx.builder.CreateFreeze(strct);
+                        strct = ctx.builder.CreateFreeze(strct); // Change this to zero initialize instead?
                 }
             }
             else if (tracked.second) {
@@ -4380,24 +4382,17 @@ static jl_cgval_t emit_new_struct(jl_codectx_t &ctx, jl_value_t *ty, size_t narg
                     ctx.builder.restoreIP(savedIP);
                 }
             }
-            for (size_t i = nargs; i < nf; i++) {
-                if (!jl_field_isptr(sty, i) && jl_is_uniontype(jl_field_type(sty, i))) {
-                    ssize_t offs = jl_field_offset(sty, i);
-                    ssize_t ptrsoffs = -1;
-                    if (!inline_roots.empty())
-                        std::tie(offs, ptrsoffs) = split_value_field(sty, i);
-                    assert(ptrsoffs < 0 && offs >= 0);
-                    int fsz = jl_field_size(sty, i) - 1;
-                    if (init_as_value) {
+            if (init_as_value) {
+                for (size_t i = nargs; i < nf; i++) {
+                    if (!jl_field_isptr(sty, i) && jl_is_uniontype(jl_field_type(sty, i))) {
+                        ssize_t offs = jl_field_offset(sty, i);
+                        ssize_t ptrsoffs = -1;
+                        if (!inline_roots.empty())
+                            std::tie(offs, ptrsoffs) = split_value_field(sty, i);
+                        assert(ptrsoffs < 0 && offs >= 0);
+                        int fsz = jl_field_size(sty, i) - 1;
                         unsigned llvm_idx = convert_struct_offset(ctx, cast<StructType>(lt), offs + fsz);
                         strct = ctx.builder.CreateInsertValue(strct, ConstantInt::get(getInt8Ty(ctx.builder.getContext()), 0), ArrayRef<unsigned>(llvm_idx));
-                    }
-                    else {
-                        jl_aliasinfo_t ai = jl_aliasinfo_t::fromTBAA(ctx, ctx.tbaa().tbaa_unionselbyte);
-                        Instruction *dest = cast<Instruction>(emit_ptrgep(ctx, strct, offs + fsz));
-                        if (promotion_point == nullptr)
-                            promotion_point = dest;
-                        ai.decorateInst(ctx.builder.CreateAlignedStore(ctx.builder.getInt8(0), dest, Align(1)));
                     }
                 }
             }
@@ -4407,9 +4402,9 @@ static jl_cgval_t emit_new_struct(jl_codectx_t &ctx, jl_value_t *ty, size_t narg
                 if (promotion_point)
                     ctx.builder.SetInsertPoint(promotion_point);
                 if (strct) {
-                    promotion_point = cast<FreezeInst>(ctx.builder.CreateFreeze(UndefValue::get(lt)));
                     jl_aliasinfo_t ai = jl_aliasinfo_t::fromTBAA(ctx, ctx.tbaa().tbaa_stack);
-                    ai.decorateInst(ctx.builder.CreateStore(promotion_point, strct));
+                    promotion_point = ai.decorateInst(ctx.builder.CreateMemSet(strct, ConstantInt::get(getInt8Ty(ctx.builder.getContext()), 0),
+                                                                jl_datatype_size(ty), MaybeAlign(jl_datatype_align(ty))));
                 }
                 ctx.builder.restoreIP(savedIP);
             }
@@ -4492,8 +4487,7 @@ static int compare_cgparams(const jl_cgparams_t *a, const jl_cgparams_t *b)
            (a->debug_info_kind == b->debug_info_kind) &&
            (a->safepoint_on_entry == b->safepoint_on_entry) &&
            (a->gcstack_arg == b->gcstack_arg) &&
-           (a->use_jlplt == b->use_jlplt) &&
-           (a->lookup == b->lookup);
+           (a->use_jlplt == b->use_jlplt);
 }
 #endif
 

@@ -26,6 +26,7 @@ const __internal_changes_list = (
     :miuninferredrm,
     :codeinfonargs,  # #54341
     :ocnopartial,
+    :printcodeinfocalls,
     # Add new change names above this line
 )
 
@@ -529,7 +530,5 @@ end
 # END 1.11 deprecations
 
 # BEGIN 1.12 deprecations
-
-@deprecate stat(fd::Integer) stat(RawFD(fd))
 
 # END 1.12 deprecations
