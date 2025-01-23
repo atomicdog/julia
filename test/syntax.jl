@@ -3303,6 +3303,7 @@ const typeof = error
 end
 let ex = :(const $(esc(:x)) = 1; (::typeof($(esc(:foo43993))))() = $(esc(:x)))
     Core.eval(M43993, Expr(:var"hygienic-scope", ex, Core))
+    @Core.latestworld
     @test M43993.x === 1
     @test invokelatest(M43993.foo43993) === 1
 end
@@ -3971,11 +3972,12 @@ end
 
 # Module Replacement
 module ReplacementContainer
+    using Test
     module ReplaceMe
         const x = 1
     end
     const Old = ReplaceMe
-    module ReplaceMe
+    @test_warn r"WARNING: replacing module ReplaceMe" @eval module ReplaceMe
         const x = 2
     end
 end

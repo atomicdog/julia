@@ -3136,8 +3136,11 @@ static jl_value_t *static_eval(jl_codectx_t &ctx, jl_value_t *ex)
 {
     if (jl_is_symbol(ex)) {
         jl_sym_t *sym = (jl_sym_t*)ex;
-        if (jl_is_const(ctx.module, sym))
-            return jl_get_global(ctx.module, sym);
+        jl_binding_t *bnd = jl_get_module_binding(ctx.module, sym, 0);
+        jl_binding_partition_t *bpart = jl_get_binding_partition_all(bnd, ctx.min_world, ctx.max_world);
+        jl_ptr_kind_union_t pku = jl_walk_binding_inplace_all(&bnd, &bpart, ctx.min_world, ctx.max_world);
+        if (jl_bkind_is_some_constant(decode_restriction_kind(pku)))
+            return decode_restriction_value(pku);
         return NULL;
     }
     if (jl_is_slotnumber(ex) || jl_is_argument(ex))
@@ -3158,11 +3161,15 @@ static jl_value_t *static_eval(jl_codectx_t &ctx, jl_value_t *ex)
     jl_sym_t *s = NULL;
     if (jl_is_globalref(ex)) {
         s = jl_globalref_name(ex);
-        jl_binding_t *b = jl_get_binding(jl_globalref_mod(ex), s);
-        jl_value_t *v = jl_get_binding_value_if_const(b);
+        jl_binding_t *bnd = jl_get_module_binding(jl_globalref_mod(ex), s, 0);
+        jl_binding_partition_t *bpart = jl_get_binding_partition_all(bnd, ctx.min_world, ctx.max_world);
+        jl_ptr_kind_union_t pku = jl_walk_binding_inplace_all(&bnd, &bpart, ctx.min_world, ctx.max_world);
+        jl_value_t *v = NULL;
+        if (jl_bkind_is_some_constant(decode_restriction_kind(pku)))
+            v = decode_restriction_value(pku);
         if (v) {
-            if (b->deprecated)
-                cg_bdw(ctx, s, b);
+            if (bnd->deprecated)
+                cg_bdw(ctx, s, bnd);
             return v;
         }
         return NULL;
@@ -3181,11 +3188,15 @@ static jl_value_t *static_eval(jl_codectx_t &ctx, jl_value_t *ex)
                     // Assumes that the module is rooted somewhere.
                     s = (jl_sym_t*)static_eval(ctx, jl_exprarg(e, 2));
                     if (s && jl_is_symbol(s)) {
-                        jl_binding_t *b = jl_get_binding(m, s);
-                        jl_value_t *v = jl_get_binding_value_if_const(b);
+                        jl_binding_t *bnd = jl_get_module_binding(m, s, 0);
+                        jl_binding_partition_t *bpart = jl_get_binding_partition_all(bnd, ctx.min_world, ctx.max_world);
+                        jl_ptr_kind_union_t pku = jl_walk_binding_inplace_all(&bnd, &bpart, ctx.min_world, ctx.max_world);
+                        jl_value_t *v = NULL;
+                        if (jl_bkind_is_some_constant(decode_restriction_kind(pku)))
+                            v = decode_restriction_value(pku);
                         if (v) {
-                            if (b->deprecated)
-                                cg_bdw(ctx, s, b);
+                            if (bnd->deprecated)
+                                cg_bdw(ctx, s, bnd);
                             return v;
                         }
                     }
@@ -3465,14 +3476,13 @@ static jl_cgval_t emit_globalref(jl_codectx_t &ctx, jl_module_t *mod, jl_sym_t *
             return mark_julia_const(ctx, constval);
         }
     }
-    if (!bpart) {
+    if (!bpart || decode_restriction_kind(pku) != BINDING_KIND_GLOBAL) {
         return emit_globalref_runtime(ctx, bnd, mod, name);
     }
     Value *bp = julia_binding_gv(ctx, bnd);
     if (bnd->deprecated) {
         cg_bdw(ctx, name, bnd);
     }
-    assert(decode_restriction_kind(pku) == BINDING_KIND_GLOBAL);
     jl_value_t *ty = decode_restriction_value(pku);
     bp = julia_binding_pvalue(ctx, bp);
     if (ty == nullptr)
@@ -4381,7 +4391,7 @@ static jl_llvm_functions_t
         jl_method_instance_t *lam,
         jl_code_info_t *src,
         jl_value_t *abi,
-        jl_value_t *rettype,
+        jl_value_t *jlrettype,
         jl_codegen_params_t &params);
 
 static void emit_hasnofield_error_ifnot(jl_codectx_t &ctx, Value *ok, jl_datatype_t *type, jl_cgval_t name);
@@ -5533,12 +5543,12 @@ static jl_value_t *get_ci_abi(jl_code_instance_t *ci)
     return jl_get_ci_mi(ci)->specTypes;
 }
 
-static jl_cgval_t emit_call_specfun_other(jl_codectx_t &ctx, jl_code_instance_t *ci, jl_value_t *jlretty, StringRef specFunctionObject, jl_code_instance_t *fromexternal,
+static jl_cgval_t emit_call_specfun_other(jl_codectx_t &ctx, jl_code_instance_t *ci, StringRef specFunctionObject, jl_code_instance_t *fromexternal,
     ArrayRef<jl_cgval_t> argv, size_t nargs, jl_returninfo_t::CallingConv *cc, unsigned *return_roots, jl_value_t *inferred_retty, Value *age_ok)
 {
     jl_method_instance_t *mi = jl_get_ci_mi(ci);
     bool is_opaque_closure = jl_is_method(mi->def.value) && mi->def.method->is_for_opaque_closure;
-    return emit_call_specfun_other(ctx, is_opaque_closure, get_ci_abi(ci), jlretty, NULL,
+    return emit_call_specfun_other(ctx, is_opaque_closure, get_ci_abi(ci), ci->rettype, NULL,
         specFunctionObject, fromexternal, argv, nargs, cc, return_roots, inferred_retty, age_ok);
 }
 
@@ -5688,7 +5698,7 @@ static jl_cgval_t emit_invoke(jl_codectx_t &ctx, const jl_cgval_t &lival, ArrayR
                         jl_returninfo_t::CallingConv cc = jl_returninfo_t::CallingConv::Boxed;
                         unsigned return_roots = 0;
                         if (specsig)
-                            result = emit_call_specfun_other(ctx, codeinst, codeinst->rettype, protoname, external ? codeinst : nullptr, argv, nargs, &cc, &return_roots, rt, age_ok);
+                            result = emit_call_specfun_other(ctx, codeinst, protoname, external ? codeinst : nullptr, argv, nargs, &cc, &return_roots, rt, age_ok);
                         else
                             result = emit_call_specfun_boxed(ctx, codeinst->rettype, protoname, external ? codeinst : nullptr, argv, nargs, rt, age_ok);
                         if (need_to_emit) {
@@ -10029,7 +10039,8 @@ jl_llvm_functions_t jl_emit_code(
         orc::ThreadSafeModule &m,
         jl_method_instance_t *li,
         jl_code_info_t *src,
-        jl_value_t *abi,
+        jl_value_t *abi_at,
+        jl_value_t *abi_rt,
         jl_codegen_params_t &params)
 {
     JL_TIMING(CODEGEN, CODEGEN_LLVM);
@@ -10038,10 +10049,8 @@ jl_llvm_functions_t jl_emit_code(
     assert((params.params == &jl_default_cgparams /* fast path */ || !params.cache ||
         compare_cgparams(params.params, &jl_default_cgparams)) &&
         "functions compiled with custom codegen params must not be cached");
-    if (!abi)
-        abi = li->specTypes;
     JL_TRY {
-        decls = emit_function(m, li, src, abi, src->rettype, params);
+        decls = emit_function(m, li, src, abi_at, abi_rt, params);
         auto stream = *jl_ExecutionEngine->get_dump_emitted_mi_name_stream();
         if (stream) {
             jl_printf(stream, "%s\t", decls.specFunctionObject.c_str());
@@ -10112,7 +10121,7 @@ jl_llvm_functions_t jl_emit_codeinst(
         return jl_llvm_functions_t(); // user error
     }
     //assert(jl_egal((jl_value_t*)jl_atomic_load_relaxed(&codeinst->debuginfo), (jl_value_t*)src->debuginfo) && "trying to generate code for a codeinst for an incompatible src");
-    jl_llvm_functions_t decls = jl_emit_code(m, jl_get_ci_mi(codeinst), src, get_ci_abi(codeinst), params);
+    jl_llvm_functions_t decls = jl_emit_code(m, jl_get_ci_mi(codeinst), src, get_ci_abi(codeinst), codeinst->rettype, params);
     return decls;
 }
 
