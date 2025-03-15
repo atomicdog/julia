@@ -17,7 +17,7 @@ module REPL
 Base.Experimental.@optlevel 1
 Base.Experimental.@max_methods 1
 
-function UndefVarError_hint(io::IO, ex::UndefVarError)
+function UndefVarError_REPL_hint(io::IO, ex::UndefVarError)
     var = ex.var
     if var === :or
         print(io, "\nSuggestion: Use `||` for short-circuiting boolean OR.")
@@ -30,67 +30,11 @@ function UndefVarError_hint(io::IO, ex::UndefVarError)
     elseif var === :quit
         print(io, "\nSuggestion: To exit Julia, use Ctrl-D, or type exit() and press enter.")
     end
-    if isdefined(ex, :scope)
-        scope = ex.scope
-        if scope isa Module
-            bpart = Base.lookup_binding_partition(Base.get_world_counter(), GlobalRef(scope, var))
-            kind = Base.binding_kind(bpart)
-            if kind === Base.BINDING_KIND_GLOBAL || kind === Base.BINDING_KIND_CONST || kind == Base.BINDING_KIND_DECLARED
-                print(io, "\nSuggestion: add an appropriate import or assignment. This global was declared but not assigned.")
-            elseif kind === Base.BINDING_KIND_FAILED
-                print(io, "\nHint: It looks like two or more modules export different ",
-                "bindings with this name, resulting in ambiguity. Try explicitly ",
-                "importing it from a particular module, or qualifying the name ",
-                "with the module it should come from.")
-            elseif kind === Base.BINDING_KIND_GUARD
-                print(io, "\nSuggestion: check for spelling errors or missing imports.")
-            else
-                print(io, "\nSuggestion: this global was defined as `$(bpart.restriction.globalref)` but not assigned a value.")
-            end
-        elseif scope === :static_parameter
-            print(io, "\nSuggestion: run Test.detect_unbound_args to detect method arguments that do not fully constrain a type parameter.")
-        elseif scope === :local
-            print(io, "\nSuggestion: check for an assignment to a local variable that shadows a global of the same name.")
-        end
-    else
-        scope = undef
-    end
-    if scope !== Base && !_UndefVarError_warnfor(io, Base, var)
-        warned = false
-        for m in Base.loaded_modules_order
-            m === Core && continue
-            m === Base && continue
-            m === Main && continue
-            m === scope && continue
-            warned |= _UndefVarError_warnfor(io, m, var)
-        end
-        warned ||
-            _UndefVarError_warnfor(io, Core, var) ||
-            _UndefVarError_warnfor(io, Main, var)
-    end
-    return nothing
-end
-
-function _UndefVarError_warnfor(io::IO, m::Module, var::Symbol)
-    Base.isbindingresolved(m, var) || return false
-    (Base.isexported(m, var) || Base.ispublic(m, var)) || return false
-    active_mod = Base.active_module()
-    print(io, "\nHint: ")
-    if isdefined(active_mod, Symbol(m))
-        print(io, "a global variable of this name also exists in $m.")
-    else
-        if Symbol(m) == var
-            print(io, "$m is loaded but not imported in the active module $active_mod.")
-        else
-            print(io, "a global variable of this name may be made accessible by importing $m in the current active module $active_mod")
-        end
-    end
-    return true
 end
 
 function __init__()
     Base.REPL_MODULE_REF[] = REPL
-    Base.Experimental.register_error_hint(UndefVarError_hint, UndefVarError)
+    Base.Experimental.register_error_hint(UndefVarError_REPL_hint, UndefVarError)
     return nothing
 end
 
@@ -1431,7 +1375,7 @@ function setup_interface(
                 end
             else
                 edit_insert(s, ';')
-                LineEdit.check_for_hint(s) && LineEdit.refresh_line(s)
+                LineEdit.check_show_hint(s)
             end
         end,
         '?' => function (s::MIState,o...)
@@ -1442,7 +1386,7 @@ function setup_interface(
                 end
             else
                 edit_insert(s, '?')
-                LineEdit.check_for_hint(s) && LineEdit.refresh_line(s)
+                LineEdit.check_show_hint(s)
             end
         end,
         ']' => function (s::MIState,o...)
@@ -1465,8 +1409,8 @@ function setup_interface(
                                         transition(s, mode) do
                                             LineEdit.state(s, mode).input_buffer = buf
                                         end
-                                        if !isempty(s) && @invokelatest(LineEdit.check_for_hint(s))
-                                            @invokelatest(LineEdit.refresh_line(s))
+                                        if !isempty(s)
+                                            @invokelatest(LineEdit.check_show_hint(s))
                                         end
                                         break
                                     end
@@ -1479,7 +1423,7 @@ function setup_interface(
                 Base.errormonitor(t_replswitch)
             else
                 edit_insert(s, ']')
-                LineEdit.check_for_hint(s) && LineEdit.refresh_line(s)
+                LineEdit.check_show_hint(s)
             end
         end,
 
@@ -1884,16 +1828,26 @@ function get_usings!(usings, ex)
     return usings
 end
 
+function create_global_out!(mod)
+    if !isdefinedglobal(mod, :Out)
+        out = Dict{Int, Any}()
+        @eval mod begin
+            const Out = $(out)
+            export Out
+        end
+        return out
+    end
+    return getglobal(mod, Out)
+end
+
 function capture_result(n::Ref{Int}, @nospecialize(x))
     n = n[]
     mod = Base.MainInclude
-    if !isdefined(mod, :Out)
-        @eval mod global Out
-        @eval mod export Out
-        setglobal!(mod, :Out, Dict{Int, Any}())
-    end
-    if x !== getglobal(mod, :Out) && x !== nothing # remove this?
-        getglobal(mod, :Out)[n] = x
+    # TODO: This invokelatest is only required due to backdated constants
+    # and should be removed after
+    out = isdefinedglobal(mod, :Out) ? invokelatest(getglobal, mod, :Out) : invokelatest(create_global_out!, mod)
+    if x !== out && x !== nothing # remove this?
+        out[n] = x
     end
     nothing
 end
