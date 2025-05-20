@@ -145,8 +145,8 @@ struct unw_table_entry
 template <typename T>
 static void jl_profile_atomic(T f) JL_NOTSAFEPOINT
 {
-    assert(0 == jl_lock_profile_rd_held());
-    jl_lock_profile_wr();
+    int havelock = jl_lock_profile_wr();
+    assert(havelock);
 #ifndef _OS_WINDOWS_
     sigset_t sset;
     sigset_t oset;
@@ -157,7 +157,8 @@ static void jl_profile_atomic(T f) JL_NOTSAFEPOINT
 #ifndef _OS_WINDOWS_
     pthread_sigmask(SIG_SETMASK, &oset, NULL);
 #endif
-    jl_unlock_profile_wr();
+    if (havelock)
+        jl_unlock_profile_wr();
 }
 
 
@@ -464,8 +465,8 @@ static int lookup_pointer(
 
     // DWARFContext/DWARFUnit update some internal tables during these queries, so
     // a lock is needed.
-    assert(0 == jl_lock_profile_rd_held());
-    jl_lock_profile_wr();
+    if (!jl_lock_profile_wr())
+        return lookup_pointer(object::SectionRef(), NULL, frames, pointer, slide, demangle, noInline);
     auto inlineInfo = context->getInliningInfoForAddress(makeAddress(Section, pointer + slide), infoSpec);
     jl_unlock_profile_wr();
 
@@ -490,7 +491,8 @@ static int lookup_pointer(
             info = inlineInfo.getFrame(i);
         }
         else {
-            jl_lock_profile_wr();
+            int havelock = jl_lock_profile_wr();
+            assert(havelock); (void)havelock;
             info = context->getLineInfoForAddress(makeAddress(Section, pointer + slide), infoSpec);
             jl_unlock_profile_wr();
         }
@@ -568,7 +570,7 @@ void JITDebugInfoRegistry::libc_frames_t::libc_deregister_frame(const char *Entr
 }
 #endif
 
-static bool getObjUUID(llvm::object::MachOObjectFile *obj, uint8_t uuid[16]) JL_NOTSAFEPOINT
+static bool getObjUUID(const object::MachOObjectFile *obj, uint8_t uuid[16]) JL_NOTSAFEPOINT
 {
     for (auto Load : obj->load_commands())
     {
@@ -830,9 +832,6 @@ static objfileentry_t find_object_file(uint64_t fbase, StringRef fname) JL_NOTSA
     std::string debuginfopath;
     uint8_t uuid[16], uuid2[16];
     if (isdarwin) {
-        // Hide Darwin symbols (e.g. CoreFoundation) from non-Darwin systems.
-#ifdef _OS_DARWIN_
-
         size_t msize = (size_t)(((uint64_t)-1) - fbase);
         std::unique_ptr<MemoryBuffer> membuf = MemoryBuffer::getMemBuffer(
                 StringRef((const char *)fbase, msize), "", false);
@@ -843,14 +842,18 @@ static objfileentry_t find_object_file(uint64_t fbase, StringRef fname) JL_NOTSA
             return entry;
         }
 
-        llvm::object::MachOObjectFile *morigobj = (llvm::object::MachOObjectFile*)
-            origerrorobj.get().get();
+        const object::MachOObjectFile *morigobj = dyn_cast<const object::MachOObjectFile>(
+            origerrorobj.get().get());
 
         // First find the uuid of the object file (we'll use this to make sure we find the
         // correct debug symbol file).
-        if (!getObjUUID(morigobj, uuid))
+        if (!morigobj || !getObjUUID(morigobj, uuid))
             return entry;
 
+        // Hide Darwin symbols (e.g. CoreFoundation) from non-Darwin systems.
+#ifndef _OS_DARWIN_
+        return entry;
+#else
         // On macOS, debug symbols are not contained in the dynamic library.
         // Use DBGCopyFullDSYMURLForUUID from the private DebugSymbols framework
         // to make use of spotlight to find the dSYM file. If that fails, lookup
@@ -906,6 +909,7 @@ static objfileentry_t find_object_file(uint64_t fbase, StringRef fname) JL_NOTSA
         if (dsfmwkbundle) {
             CFRelease(dsfmwkbundle);
         }
+#endif
 
         if (objpath.empty()) {
             // Fall back to simple path relative to the dynamic library.
@@ -915,7 +919,6 @@ static objfileentry_t find_object_file(uint64_t fbase, StringRef fname) JL_NOTSA
             debuginfopath += fname.substr(sep + 1);
             objpath = debuginfopath;
         }
-#endif
     }
     else {
         // On Linux systems we need to mmap another copy because of the permissions on the mmap'ed shared library.
@@ -974,15 +977,17 @@ static objfileentry_t find_object_file(uint64_t fbase, StringRef fname) JL_NOTSA
 
         if (isdarwin) {
             // verify the UUID matches
-            if (!getObjUUID((llvm::object::MachOObjectFile*)debugobj, uuid2) ||
-                    memcmp(uuid, uuid2, sizeof(uuid)) != 0) {
+            if (!isa<const object::MachOObjectFile>(debugobj) ||
+                !getObjUUID(cast<const object::MachOObjectFile>(debugobj), uuid2) ||
+                memcmp(uuid, uuid2, sizeof(uuid)) != 0) {
                 return entry;
             }
         }
 
         int64_t slide = 0;
         if (auto *OF = dyn_cast<const object::COFFObjectFile>(debugobj)) {
-            assert(iswindows);
+            if (!iswindows) // the COFF parser accepts some garbage inputs (like empty files) that the other parsers correctly reject, so we can end up here even when we should not
+                return entry;
             slide = OF->getImageBase() - fbase;
         }
         else {
@@ -1195,8 +1200,8 @@ int jl_DI_for_fptr(uint64_t fptr, uint64_t *symsize, int64_t *slide,
         object::SectionRef *Section, llvm::DIContext **context) JL_NOTSAFEPOINT
 {
     int found = 0;
-    assert(0 == jl_lock_profile_rd_held());
-    jl_lock_profile_wr();
+    if (!jl_lock_profile_wr())
+        return 0;
 
     if (symsize)
         *symsize = 0;

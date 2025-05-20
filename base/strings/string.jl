@@ -78,8 +78,13 @@ function String(v::Vector{UInt8})
     return str
 end
 
-"Create a string re-using the memory, if possible.
-Mutating or reading the memory after calling this function is undefined behaviour."
+"""
+    unsafe_takestring(m::Memory{UInt8})::String
+
+Create a `String` from `m`, changing the interpretation of the contents of `m`.
+This is done without copying, if possible. Thus, any access to `m` after
+calling this function, either to read or to write, is undefined behaviour.
+"""
 function unsafe_takestring(m::Memory{UInt8})
     isempty(m) ? "" : ccall(:jl_genericmemory_to_string, Ref{String}, (Any, Int), m, length(m))
 end
@@ -226,7 +231,7 @@ end
     end)(s, i, n, l)
 end
 
-## checking UTF-8 & ACSII validity ##
+## checking UTF-8 & ASCII validity ##
 #=
     The UTF-8 Validation is performed by a shift based DFA.
     ┌───────────────────────────────────────────────────────────────────┐
@@ -374,7 +379,7 @@ end
 
 ##
 
-# Classifcations of string
+# Classifications of string
     # 0: neither valid ASCII nor UTF-8
     # 1: valid ASCII
     # 2: valid UTF-8
@@ -559,7 +564,7 @@ isascii(s::String) = isascii(codeunits(s))
 @assume_effects :foldable repeat(c::Char, r::BitInteger) = @invoke repeat(c::Char, r::Integer)
 
 """
-    repeat(c::AbstractChar, r::Integer) -> String
+    repeat(c::AbstractChar, r::Integer)::String
 
 Repeat a character `r` times. This can equivalently be accomplished by calling
 [`c^r`](@ref :^(::Union{AbstractString, AbstractChar}, ::Integer)).

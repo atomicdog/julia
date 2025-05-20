@@ -576,10 +576,10 @@ function _eq(t1::Any32, t2::Any32)
 end
 
 const tuplehash_seed = UInt === UInt64 ? 0x77cfa1eef01bca90 : 0xf01bca90
-hash(::Tuple{}, h::UInt) = h + tuplehash_seed
+hash(::Tuple{}, h::UInt) = h ⊻ tuplehash_seed
 hash(t::Tuple, h::UInt) = hash(t[1], hash(tail(t), h))
 function hash(t::Any32, h::UInt)
-    out = h + tuplehash_seed
+    out = h ⊻ tuplehash_seed
     for i = length(t):-1:1
         out = hash(t[i], out)
     end
@@ -649,15 +649,12 @@ reverse(t::Tuple) = revargs(t...)
 
 ## specialized reduction ##
 
-# used in bootstrapping
-function prod(x::Tuple{Vararg{Int}})
-    @_terminates_locally_meta
-    r = 1
-    for y in x
-        r *= y
-    end
-    r
-end
+prod(x::Tuple{}) = 1
+# This is consistent with the regular prod because there is no need for size promotion
+# if all elements in the tuple are of system size.
+# It is defined here separately in order to support bootstrap, because it's needed earlier
+# than the general prod definition is available.
+prod(x::Tuple{Int, Vararg{Int}}) = *(x...)
 
 # a version of `in` esp. for NamedTuple, to make it pure, and not compiled for each tuple length
 function sym_in(x::Symbol, itr::Tuple{Vararg{Symbol}})

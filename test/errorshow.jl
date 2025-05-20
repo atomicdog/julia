@@ -406,6 +406,8 @@ let err_str,
     @test occursin("MethodError: no method matching Bool()", err_str)
     err_str = @except_str :a() MethodError
     @test occursin("MethodError: objects of type Symbol are not callable", err_str)
+    err_str = @except_str missing(1) MethodError
+    @test occursin("MethodError: objects of type Missing are not callable", err_str)
     err_str = @except_str EightBitType() MethodError
     @test occursin("MethodError: no method matching $(curmod_prefix)EightBitType()", err_str)
     err_str = @except_str i() MethodError
@@ -419,7 +421,10 @@ let err_str,
     err_str = @except_str FunctionLike()() MethodError
     @test occursin("MethodError: no method matching (::$(curmod_prefix)FunctionLike)()", err_str)
     err_str = @except_str [1,2](1) MethodError
-    @test occursin("MethodError: objects of type Vector{$Int} are not callable\nUse square brackets [] for indexing an Array.", err_str)
+    @test occursin("MethodError: objects of type Vector{$Int} are not callable.\n"*
+        "In case you did not try calling it explicitly, check if a Vector{$Int}"*
+        " has been passed as an argument to a method that expects a callable instead.\n"*
+        "In case you're trying to index into the array, use square brackets [] instead of parentheses ().", err_str)
     # Issue 14940
     err_str = @except_str randn(1)() MethodError
     @test occursin("MethodError: objects of type Vector{Float64} are not callable", err_str)
