@@ -7,11 +7,9 @@ const Callable = Union{Function,Type}
 const Bottom = Union{}
 
 # Define minimal array interface here to help code used in macros:
-length(a::Array{T, 0}) where {T} = 1
-length(a::Array{T, 1}) where {T} = getfield(a, :size)[1]
-length(a::Array{T, 2}) where {T} = (sz = getfield(a, :size); sz[1] * sz[2])
-# other sizes are handled by generic prod definition for AbstractArray
-length(a::GenericMemory) = getfield(a, :length)
+size(a::Array) = getfield(a, :size)
+length(t::AbstractArray) = (@inline; prod(size(t)))
+size(a::GenericMemory) = (getfield(a, :length),)
 throw_boundserror(A, I) = (@noinline; throw(BoundsError(A, I)))
 
 # multidimensional getindex will be defined later on
@@ -981,11 +979,7 @@ setindex!(A::MemoryRef{Any}, @nospecialize(x)) = (memoryrefset!(A, x, :not_atomi
 
 getindex(v::SimpleVector, i::Int) = (@_foldable_meta; Core._svec_ref(v, i))
 function length(v::SimpleVector)
-    @_total_meta
-    t = @_gc_preserve_begin v
-    len = unsafe_load(Ptr{Int}(pointer_from_objref(v)))
-    @_gc_preserve_end t
-    return len
+    Core._svec_len(v)
 end
 firstindex(v::SimpleVector) = 1
 lastindex(v::SimpleVector) = length(v)
@@ -1060,6 +1054,10 @@ struct Colon <: Function
 end
 const (:) = Colon()
 
+function show(io::IO, ::Colon)
+    show_type_name(io, Colon.name)
+    print(io, "()")
+end
 
 """
     Val(c)

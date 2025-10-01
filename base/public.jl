@@ -80,6 +80,10 @@ public
     isoperator,
     isunaryoperator,
 
+# Integer math
+    uabs,
+    mul_hi,
+
 # C interface
     cconvert,
     unsafe_convert,
