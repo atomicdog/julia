@@ -51,7 +51,7 @@ end
 
 function contains_ssa_binding(ctx, ex)
     contains_unquoted(ex) do e
-        kind(e) == K"BindingId" && lookup_binding(ctx, e).is_ssa
+        kind(e) == K"BindingId" && get_binding(ctx, e).is_ssa
     end
 end
 
@@ -611,10 +611,11 @@ function replace_beginend(ctx, ex, arr, n, splats, is_last)
             replace_beginend(ctx, ex[1], arr, n, splats, is_last)
             ex[2:end]...
         ]
-    # elseif k == K"kw" - keyword args - what does this mean here?
-    #   # note from flisp
-    #   # TODO: this probably should not be allowed since keyword args aren't
-    #   # positional, but in this context we have just used their positions anyway
+    elseif k == K"kw"
+        # note from flisp
+        # TODO: this probably should not be allowed since keyword args aren't
+        # positional, but in this context we have just used their positions anyway
+        @ast ctx ex [K"kw" ex[1] replace_beginend(ctx, ex[2], arr, n, splats, is_last)]
     else
         mapchildren(e->replace_beginend(ctx, e, arr, n, splats, is_last), ctx, ex)
     end
@@ -1112,7 +1113,7 @@ function flatten_ncat_rows!(flat_elems, nrow_spans, row_major, parent_layout_dim
         layout_dim = 1
         @chk parent_layout_dim != 1 (ex,"Badly nested rows in `ncat`")
     elseif k == K"nrow"
-        dim = numeric_flags(ex)
+        dim = JuliaSyntax.numeric_flags(ex)
         @chk dim > 0                (ex,"Unsupported dimension $dim in ncat")
         @chk !row_major || dim != 2 (ex,"2D `nrow` cannot be mixed with `row` in `ncat`")
         layout_dim = nrow_flipdim(row_major, dim)
@@ -1145,7 +1146,7 @@ end
 # - ragged column first or row first
 function expand_ncat(ctx, ex)
     is_typed = kind(ex) == K"typed_ncat"
-    outer_dim = numeric_flags(ex)
+    outer_dim = JuliaSyntax.numeric_flags(ex)
     @chk outer_dim > 0 (ex,"Unsupported dimension in ncat")
     eltype      = is_typed ? ex[1]     : nothing
     elements    = is_typed ? ex[2:end] : ex[1:end]
@@ -2207,7 +2208,7 @@ function expand_decls(ctx, ex)
     bindings = children(ex)
     stmts = SyntaxList(ctx)
     for binding in bindings
-        if is_prec_assignment(kind(binding))
+        if JuliaSyntax.is_prec_assignment(kind(binding))
             @chk numchildren(binding) == 2
             # expand_assignment will create the type decls
             make_lhs_decls(ctx, stmts, declkind, declmeta, binding[1], false)
@@ -2970,6 +2971,9 @@ function expand_function_def(ctx, ex, docs, rewrite_call=identity, rewrite_body=
         name
     elseif kind(name) == K"tuple"
         # Anonymous function syntax `function (x,y) ... end`
+        name = mapchildren(ctx, name) do a
+            kind(a) === K"=" ? @ast(ctx, a, [K"kw" children(a)...]) : a
+        end
         @ast ctx name [K"call"
             "#anon#"::K"Placeholder"
             children(name)...
