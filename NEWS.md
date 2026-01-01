@@ -24,6 +24,10 @@ Command-line option changes
 Multi-threading changes
 -----------------------
 
+  - New functions `Threads.atomic_fence_heavy` and `Threads.atomic_fence_light` provide support for
+    asymmetric atomic fences, speeding up atomic synchronization where one side of the synchronization
+    runs significantly less often than the other ([#60311]).
+
 Build system changes
 --------------------
 
@@ -32,6 +36,9 @@ New library functions
 
 New library features
 --------------------
+
+* `IOContext` supports a new boolean `hexunsigned` option that allows for
+  printing unsigned integers in decimal instead of hexadecimal ([#60267]).
 
 Standard library changes
 ------------------------
@@ -50,6 +57,10 @@ Standard library changes
 #### REPL
 
 #### Test
+
+* `@test`, `@test_throws`, and `@test_broken` now support a `context` keyword argument
+  that provides additional information displayed on test failure. This is useful for
+  debugging which specific case failed in parameterized tests ([#60501]).
 
 #### InteractiveUtils
 
