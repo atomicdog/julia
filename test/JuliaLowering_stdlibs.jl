@@ -2,13 +2,8 @@ import Libdl
 
 # known precompilation failures under JL
 const INCOMPATIBLE_STDLIBS = String[
-    "InteractiveUtils", # Invalid function name
-    "LibGit2", # op isa Symbol (JuliaLang/JuliaLowering.jl#126)
-    "SparseArrays", # type-alias bug (JuliaLang/JuliaLowering.jl#123)
-    "TOML", # @invokelatest / QuoteNode bug
-    "Test", # depends on InteractiveUtils
-    "REPL", # depends on InteractiveUtils
-    "Pkg", # depends on TOML
+    "SparseArrays", # closure static parameter bug (JuliaLang/JuliaLowering.jl#134)
+    "Pkg", # closure w/ kwarg bug (JuliaLang/JuliaLowering.jl#139)
     "SuiteSparse", # depends on SparseArrays
     "LazyArtifacts", # depends on Pkg
 ]

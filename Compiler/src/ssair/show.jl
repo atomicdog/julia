@@ -380,7 +380,7 @@ end
 # utility function to extract the first line number and file of a block of code
 function debuginfo_firstline(debuginfo::Union{DebugInfo,DebugInfoStream})
     linetable = debuginfo.linetable
-    while linetable != nothing
+    while linetable !== nothing
         debuginfo = linetable
         linetable = debuginfo.linetable
     end
@@ -1213,3 +1213,15 @@ function get_debuginfo_printer(mode::Symbol)
 end
 
 get_debuginfo_printer(src, mode::Symbol) = get_debuginfo_printer(mode)(src)
+
+# True if one can be pretty certain that the compiler handles this union well,
+# i.e. must be small with concrete types.
+function is_expected_union(u::Union)
+    Base.unionlen(u) < 4 || return false
+    for x in Base.uniontypes(u)
+        if !Base.isdispatchelem(x) || x == Core.Box
+            return false
+        end
+    end
+    return true
+end

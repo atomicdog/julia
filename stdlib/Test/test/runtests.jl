@@ -7,6 +7,8 @@ using Distributed: RemoteException
 
 import Logging: Debug, Info, Warn, with_logger
 
+@test isempty(Test.detect_closure_boxes(Test))
+
 @testset "@test" begin
     atol = 1
     a = (; atol=2)
@@ -29,6 +31,59 @@ import Logging: Debug, Info, Warn, with_logger
     @test 'a' .. 'a'
     @test !('a' .. 'b')
 end
+
+
+module ClosureBoxTest
+    function boxed()
+        x = 1
+        inner() = (x += 1)
+        inner()
+    end
+
+    module Sub
+        function boxed_sub()
+            x = 0
+            inner() = (x += 1)
+            inner()
+        end
+    end
+end
+
+module ClosureBoxRedefTest
+    function boxed()
+        x = 1
+        inner() = (x += 1)
+        inner()
+    end
+end
+
+@testset "detect_closure_boxes" begin
+    boxes = Test.detect_closure_boxes(ClosureBoxTest)
+    @test any(p -> p.first.name === :boxed, boxes)
+    @test any(p -> p.first.name === :boxed_sub, boxes)
+
+    sub_boxes = Test.detect_closure_boxes(ClosureBoxTest.Sub)
+    @test any(p -> p.first.name === :boxed_sub, sub_boxes)
+    @test all(p -> parentmodule(p.first) === ClosureBoxTest.Sub, sub_boxes)
+
+    @test isempty(Test.detect_closure_boxes())
+
+    # _all version checks all loaded modules
+    all_boxes = Test.detect_closure_boxes_all_modules()
+    @test any(p -> p.first.name === :boxed, all_boxes)
+
+    # Redefinition should drop closure boxes from shadowed methods.
+    @test !isempty(Test.detect_closure_boxes(ClosureBoxRedefTest))
+    @eval ClosureBoxRedefTest begin
+        function boxed()
+            x = 1
+            inner() = x + 1
+            inner()
+        end
+    end
+    @test isempty(Test.detect_closure_boxes(ClosureBoxRedefTest))
+end
+
 @testset "@test with skip/broken kwargs" begin
     # Make sure the local variables can be used in conditions
     a = 1
@@ -240,6 +295,71 @@ end
         @test length(results) == 1
         @test results[1] isa Test.Broken
         @test results[1].test_type === :skipped
+    end
+end
+
+@testset "@test_warn/@test_nowarn failure display" begin
+    # @test_warn with string pattern - failure shows expected and captured stderr
+    let results = @testset NoThrowTestSet begin
+            @test_warn "expected" println(stderr, "wrong")
+        end
+        @test length(results) == 1
+        fail = results[1]
+        @test fail isa Test.Fail
+        @test fail.test_type === :test_warn
+        @test fail.data == "\"expected\" (occursin)"
+        @test fail.value == "\"wrong\\n\""
+        str = sprint(show, fail)
+        @test occursin("Expected stderr:", str)
+        @test occursin("Captured stderr:", str)
+    end
+
+    # @test_warn with regex pattern
+    let results = @testset NoThrowTestSet begin
+            @test_warn r"expected" println(stderr, "wrong")
+        end
+        @test length(results) == 1
+        fail = results[1]
+        @test fail isa Test.Fail
+        @test fail.test_type === :test_warn
+        @test fail.data == "r\"expected\" (occursin)"
+    end
+
+    # @test_warn with array pattern
+    let results = @testset NoThrowTestSet begin
+            @test_warn ["foo", "bar"] println(stderr, "only foo")
+        end
+        @test length(results) == 1
+        fail = results[1]
+        @test fail isa Test.Fail
+        @test fail.test_type === :test_warn
+        @test occursin("(all, occursin)", fail.data)
+    end
+
+    # @test_warn with function pattern
+    let results = @testset NoThrowTestSet begin
+            @test_warn (s -> occursin("expected", s)) println(stderr, "wrong")
+        end
+        @test length(results) == 1
+        fail = results[1]
+        @test fail isa Test.Fail
+        @test fail.test_type === :test_warn
+        @test occursin("s->occursin(\"expected\", s)", fail.data)  # Shows the function expression
+    end
+
+    # @test_nowarn failure shows expected "" and captured stderr
+    let results = @testset NoThrowTestSet begin
+            @test_nowarn println(stderr, "oops")
+        end
+        @test length(results) == 1
+        fail = results[1]
+        @test fail isa Test.Fail
+        @test fail.test_type === :test_nowarn
+        @test fail.data == "\"\" (nowarn)"
+        @test fail.value == "\"oops\\n\""
+        str = sprint(show, fail)
+        @test occursin("Expected stderr: \"\" (nowarn)", str)
+        @test occursin("Captured stderr: \"oops\\n\"", str)
     end
 end
 

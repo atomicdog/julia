@@ -636,7 +636,7 @@ void jl_gc_reset_alloc_count(void) JL_NOTSAFEPOINT
 static void jl_gc_free_memory(jl_genericmemory_t *m, int isaligned) JL_NOTSAFEPOINT
 {
     assert(jl_is_genericmemory(m));
-    assert(jl_genericmemory_how(m) == 1 || jl_genericmemory_how(m) == 2);
+    assert(jl_genericmemory_how(m) == 1);
     char *d = (char*)m->ptr;
     size_t freed_bytes = memory_block_usable_size(d, isaligned);
     assert(freed_bytes != 0);
@@ -4142,8 +4142,12 @@ void jl_gc_notify_image_load(const char* img_data, size_t len)
     // Do nothing
 }
 
-JL_DLLEXPORT const char* jl_gc_active_impl(void)
+void jl_gc_notify_image_alloc(const char* img_data, size_t len)
 {
+    // Do nothing
+}
+
+JL_DLLEXPORT const char* jl_gc_active_impl(void) {
     return "Built with stock GC";
 }
 

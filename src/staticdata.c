@@ -3327,7 +3327,7 @@ static void jl_write_header_for_incremental(ios_t *f, jl_array_t *worklist, jl_a
     write_worklist_for_header(f, worklist);
     // Determine unique (module, abspath, fsize, hash, mtime) dependencies for the files defining modules in the worklist
     // (see Base._require_dependencies). These get stored in `udeps` and written to the ji-file header
-    // (abspath will be converted to a relocateable @depot path before writing, cf. Base.replace_depot_path).
+    // (abspath will be converted to a relocatable @depot path before writing, cf. Base.replace_depot_path).
     // Also write Preferences.
     // last word of the dependency list is the end of the data / start of the srctextpos
     *srctextpos = write_dependency_list(f, worklist, udeps);  // srctextpos: position of srctext entry in header index (update later)
@@ -3493,6 +3493,7 @@ JL_DLLEXPORT jl_image_buf_t jl_preload_sysimg(const char *fname)
         ios_seek_end(&f);
         size_t len = ios_pos(&f);
         char *sysimg = (char*)jl_gc_perm_alloc(len, 0, 64, 0);
+        jl_gc_notify_image_alloc(sysimg, len);
         ios_seek(&f, 0);
 
         if (ios_readall(&f, sysimg, len) != len)
@@ -4366,9 +4367,10 @@ static jl_value_t *jl_restore_package_image_from_stream(ios_t *f, jl_image_t *im
         char *sysimg;
         int success = !needs_permalloc;
         ios_seek(f, datastartpos);
-        if (needs_permalloc)
+        if (needs_permalloc) {
             sysimg = (char*)jl_gc_perm_alloc(len, 0, 64, 0);
-        else
+            jl_gc_notify_image_alloc(sysimg, len);
+        } else
             sysimg = &f->buf[f->bpos];
         if (needs_permalloc)
             success = ios_readall(f, sysimg, len) == len;
