@@ -1,0 +1,42 @@
+# This file is a part of Julia. License is MIT: https://julialang.org/license
+#
+# Reference build environment for Julia on ppc64le (Linux glibc).
+# Builds with Podman or Docker. Matches the build dependencies documented in
+# doc/src/devdocs/build/build.md.
+#
+# Usage:
+#   podman build -t julia-ppc64le-build -f contrib/ppc64le/Containerfile .
+#   podman run --rm -v "$PWD:/src:Z" -w /src julia-ppc64le-build make -j$(nproc)
+
+FROM docker.io/library/ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        curl \
+        diffutils \
+        g++ \
+        gcc \
+        gfortran \
+        git \
+        libatomic1 \
+        m4 \
+        make \
+        patch \
+        perl \
+        pkg-config \
+        python3 \
+        wget \
+        which \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# Intentionally no `USER` directive: under rootless Podman, container root
+# maps to the host user that owns the bind-mounted source tree. Adding a
+# non-root user would map to a subuid and break writes to /src.
+
+CMD ["/bin/bash"]

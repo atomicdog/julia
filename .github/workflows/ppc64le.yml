@@ -1,0 +1,65 @@
+name: ppc64le
+
+permissions: {}
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  build:
+    name: Build and test on POWER9
+    runs-on: ubuntu-24.04-ppc64le
+    timeout-minutes: 240
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Show host info
+        run: |
+          uname -a
+          cat /proc/cpuinfo | head -40
+          free -h
+          df -h .
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cmake curl diffutils \
+            g++ gcc gfortran git libatomic1 m4 make patch perl \
+            pkg-config python3 wget which
+
+      - name: Configure Make.user
+        run: |
+          cp contrib/ppc64le/Make.user.ppc64le Make.user
+          cat Make.user
+
+      - name: Build Julia
+        run: |
+          make -j"$(nproc)" release
+
+      - name: Sanity test
+        run: |
+          ./julia -e 'using InteractiveUtils; versioninfo(verbose=true); @assert Sys.ARCH === :powerpc64le'
+
+      - name: Run Base test subset
+        # Full `make testall` is multi-hour; start with Base smoke tests and
+        # expand as the tier-promotion case matures.
+        run: |
+          make test-Base 2>&1 | tee test-Base.log
+        continue-on-error: true
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ppc64le-test-logs
+          path: |
+            test-Base.log
+            deps/scratch/*.log
+          if-no-files-found: ignore

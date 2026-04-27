@@ -288,6 +288,7 @@ DevDocs = [
         "devdocs/build/windows.md",
         "devdocs/build/freebsd.md",
         "devdocs/build/arm.md",
+        "devdocs/build/ppc64le.md",
         "devdocs/build/riscv.md",
         "devdocs/build/distributing.md",
     ],

@@ -1,0 +1,8 @@
+# This file is a part of Julia. License is MIT: https://julialang.org/license
+#
+# Drop-in Make.user for ppc64le (Linux glibc) builds.
+# Copy to <build-dir>/Make.user before invoking make.
+#
+# The defaults in Make.inc (OPENBLAS_TARGET_ARCH=POWER8, no MARCH) are
+# correct for native builds on POWER8/9/10. This file is intentionally
+# minimal so any overrides added here stay rare and visible.
