@@ -1,0 +1,84 @@
+From 5b6b4fdb4b07e1d0d9a647f40a30d47f26178e09 Mon Sep 17 00:00:00 2001
+From: Matt Arsenault <Matthew.Arsenault@amd.com>
+Date: Wed, 19 Mar 2025 18:30:34 +0700
+Subject: [PATCH] DAG: Fix promote of half freeze (#131844)
+
+Cherry-pick of llvm/llvm-project@5b6b4fdb4b07e1d0d9a647f40a30d47f26178e09
+(merged 2025-03-19 into main, present in release/21.x and later).
+
+The `release/20.x` line was closed at 20.1.8 (2025-06-14) without this
+fix backported, so on PowerPC ppc64le-linux-gnu (which selects the
+promote-float strategy for half) any IR with `freeze half` aborts in
+SelectionDAG type legalization at -O2+:
+
+    LLVM ERROR: Do not know how to promote this operator's result!
+
+Reproducer in Julia 1.14 with bundled LLVM 20.1.8 on Power9:
+
+    using Random
+    length(Set(rand(Float16, 8)))
+
+The trigger is `Base.ht_keyindex2_shorthash!{Float16, V}` at -O2: GVN /
+InstCombine inject `freeze half %key` to discharge poison, and PPC's
+PromoteFloatResult has no FREEZE case and falls to report_fatal_error.
+
+This patch is the upstream `lib/` portion of #131844, applied to the
+`llvm/` subdirectory of JuliaLang/llvm-project's `julia-20.1.8-0`
+branch via `LLVM_PATCH` (paths stripped of the `llvm/` prefix). The
+9000-line AMDGPU test golden update from the upstream PR is omitted
+since downstream builds do not run the LLVM test suite.
+
+Discard this patch when bundled LLVM moves to 21.x or later.
+
+---
+ lib/CodeGen/SelectionDAG/LegalizeFloatTypes.cpp | 19 +++++++++++++++++--
+ lib/CodeGen/SelectionDAG/LegalizeTypes.h        |  1 +
+ 2 files changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/lib/CodeGen/SelectionDAG/LegalizeFloatTypes.cpp b/lib/CodeGen/SelectionDAG/LegalizeFloatTypes.cpp
+--- a/lib/CodeGen/SelectionDAG/LegalizeFloatTypes.cpp
++++ b/lib/CodeGen/SelectionDAG/LegalizeFloatTypes.cpp
+@@ -2701,7 +2701,12 @@ void DAGTypeLegalizer::PromoteFloatResult(SDNode *N, unsigned ResNo) {
+ #endif
+       report_fatal_error("Do not know how to promote this operator's result!");
+
+-    case ISD::BITCAST:    R = PromoteFloatRes_BITCAST(N); break;
++    case ISD::BITCAST:
++      R = PromoteFloatRes_BITCAST(N);
++      break;
++    case ISD::FREEZE:
++      R = PromoteFloatRes_FREEZE(N);
++      break;
+     case ISD::ConstantFP: R = PromoteFloatRes_ConstantFP(N); break;
+     case ISD::EXTRACT_VECTOR_ELT:
+                           R = PromoteFloatRes_EXTRACT_VECTOR_ELT(N); break;
+@@ -2814,6 +2819,18 @@ SDValue DAGTypeLegalizer::PromoteFloatRes_BITCAST(SDNode *N) {
+   return DAG.getNode(GetPromotionOpcode(VT, NVT), SDLoc(N), NVT, Cast);
+ }
+
++SDValue DAGTypeLegalizer::PromoteFloatRes_FREEZE(SDNode *N) {
++  EVT VT = N->getValueType(0);
++  EVT NVT = TLI.getTypeToTransformTo(*DAG.getContext(), VT);
++  // Input type isn't guaranteed to be a scalar int so bitcast if not. The
++  // bitcast will be legalized further if necessary.
++  EVT IVT = EVT::getIntegerVT(*DAG.getContext(),
++                              N->getOperand(0).getValueType().getSizeInBits());
++  SDValue Cast = DAG.getBitcast(IVT, N->getOperand(0));
++  return DAG.getNode(GetPromotionOpcode(VT, NVT), SDLoc(N), NVT,
++                     DAG.getFreeze(Cast));
++}
++
+ SDValue DAGTypeLegalizer::PromoteFloatRes_ConstantFP(SDNode *N) {
+   ConstantFPSDNode *CFPNode = cast<ConstantFPSDNode>(N);
+   EVT VT = N->getValueType(0);
+diff --git a/lib/CodeGen/SelectionDAG/LegalizeTypes.h b/lib/CodeGen/SelectionDAG/LegalizeTypes.h
+--- a/lib/CodeGen/SelectionDAG/LegalizeTypes.h
++++ b/lib/CodeGen/SelectionDAG/LegalizeTypes.h
+@@ -756,6 +756,7 @@ class LLVM_LIBRARY_VISIBILITY DAGTypeLegalizer {
+
+   void PromoteFloatResult(SDNode *N, unsigned ResNo);
+   SDValue PromoteFloatRes_BITCAST(SDNode *N);
++  SDValue PromoteFloatRes_FREEZE(SDNode *N);
+   SDValue PromoteFloatRes_BinOp(SDNode *N);
+   SDValue PromoteFloatRes_UnaryWithTwoFPResults(SDNode *N);
+   SDValue PromoteFloatRes_ConstantFP(SDNode *N);

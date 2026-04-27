@@ -257,6 +257,10 @@ ifeq ($(shell test $(LLVM_VER_MAJ) -lt 19 && echo true),true)
 $(eval $(call LLVM_PATCH,llvm-ittapi-cmake))
 endif
 
+ifeq ($(shell test $(LLVM_VER_MAJ) -ge 20 && echo true),true)
+$(eval $(call LLVM_PATCH,llvm-promotefloatresult-freeze))
+endif
+
 ifeq ($(USE_SYSTEM_ZLIB), 0)
 $(LLVM_BUILDDIR_withtype)/build-configured: | $(build_prefix)/manifest/zlib
 endif
