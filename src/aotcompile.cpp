@@ -750,7 +750,15 @@ static void aot_link_output(jl_codegen_output_t &out)
             funcs = {it->second.invoke_api, it->second.invoke, it->second.specptr};
         }
         else if (out.external_linkage && api == JL_INVOKE_SPECSIG &&
-                 (jl_atomic_load_relaxed(&ci->flags) & JL_CI_FLAGS_FROM_IMAGE)) {
+                 (jl_atomic_load_relaxed(&ci->flags) & JL_CI_FLAGS_FROM_IMAGE) &&
+                 // The PowerPC LLVM backend does not implement musttail
+                 // lowering, which the generic fallback in emit_pkg_plt_thunk
+                 // requires (llvm/llvm-project#108014, #63214, #56679). Skip
+                 // the cross-package PLT thunk on PPC and fall through to the
+                 // boxed-args path below; emit_specsig_to_fptr1 then wraps it
+                 // for the SPECSIG call site at the cost of an extra
+                 // box/unbox per cross-package call.
+                 !out.TargetTriple.isPPC()) {
             Function *f = emit_pkg_plt_thunk(out, ci, target.decl);
             funcs = {JL_INVOKE_SPECSIG, nullptr, f};
         }
