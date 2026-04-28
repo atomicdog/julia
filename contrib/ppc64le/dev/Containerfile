@@ -45,6 +45,11 @@ RUN mkdir -p /opt/julia \
              /opt/julia/share/julia/environments/v1.14/Manifest.toml \
     && julia --version
 
+# Bundled Pluto launch script (used by contrib/ppc64le/dev/pluto.sh). Bakes
+# in /root/pluto-launch.jl so a fresh container is immediately ready to
+# `tmux new-session -d 'julia /root/pluto-launch.jl'`.
+COPY pluto-launch.jl /root/pluto-launch.jl
+
 # Pluto (1234), Jupyter (8888), generic IDE (3000).
 EXPOSE 1234 8888 3000
 

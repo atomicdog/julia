@@ -42,6 +42,7 @@ trap 'rm -rf "$CTX"' EXIT
 
 cp "$JULIA_TARBALL" "$CTX/julia.tar.gz"
 cp "$HERE/Containerfile" "$CTX/"
+cp "$HERE/pluto-launch.jl" "$CTX/"
 
 echo "Building $IMAGE from $JULIA_TARBALL"
 "$CONTAINER_RUNTIME" build -t "$IMAGE" "$CTX"
