@@ -1,0 +1,48 @@
+# This file is a part of Julia. License is MIT: https://julialang.org/license
+#
+# Long-lived dev environment for Julia ppc64le. Builds on top of the
+# reference build image's deps with extra tooling for interactive use
+# (tmux, vim, less, Python for Jupyter, etc.) and bakes in a Julia
+# binary-dist tarball so the container is self-contained.
+#
+# Use contrib/ppc64le/dev/build.sh to build; it places the binary-dist
+# tarball into the build context as julia.tar.gz before invoking
+# `podman build`.
+
+FROM docker.io/library/ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+        git \
+        less \
+        make \
+        pkg-config \
+        python3 \
+        python3-pip \
+        python3-venv \
+        tmux \
+        vim \
+        wget \
+        which \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY julia.tar.gz /tmp/julia.tar.gz
+RUN mkdir -p /opt/julia \
+    && tar -xzf /tmp/julia.tar.gz -C /opt/julia --strip-components=1 \
+    && rm /tmp/julia.tar.gz \
+    && ln -sf /opt/julia/bin/julia /usr/local/bin/julia \
+    && julia --version
+
+# Pluto (1234), Jupyter (8888), generic IDE (3000).
+EXPOSE 1234 8888 3000
+
+# Intentionally no `USER` directive: under rootless Podman, container root
+# maps to the host user that owns the bind-mounted workspace. Adding a
+# non-root user would map to a subuid and break writes.
+
+WORKDIR /workspace
+CMD ["sleep", "infinity"]
