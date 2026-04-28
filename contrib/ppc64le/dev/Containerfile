@@ -35,6 +35,14 @@ RUN mkdir -p /opt/julia \
     && tar -xzf /tmp/julia.tar.gz -C /opt/julia --strip-components=1 \
     && rm /tmp/julia.tar.gz \
     && ln -sf /opt/julia/bin/julia /usr/local/bin/julia \
+    # `make install` carries forward whatever Project.toml the build host's
+    # default v1.14 env had. After running stdlib tests during the build,
+    # that file gets polluted with a transient `BasicSandbox` test fixture
+    # entry pointing to a /tmp path that no longer exists, which then
+    # poisons every subsequent `Pkg.add` call inside the container. Clear
+    # the bundled defaults so the user gets a fresh env on first use.
+    && rm -f /opt/julia/share/julia/environments/v1.14/Project.toml \
+             /opt/julia/share/julia/environments/v1.14/Manifest.toml \
     && julia --version
 
 # Pluto (1234), Jupyter (8888), generic IDE (3000).
